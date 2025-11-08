@@ -79,3 +79,23 @@ python -m pytest
 Ensure new handlers include meaningful tests under `tests/handlers/` and that
 documentation (README, HANDLERS.md, this runbook) stays in sync with the
 current workflow.
+
+## Appendix: Virtual environment setup
+
+Use the helper script to create a local venv and install dependencies:
+
+```bash
+./scripts/setup_venv.sh .venv
+source .venv/bin/activate
+python -m pytest
+```
+
+Override the interpreter via `PYTHON_BIN=/path/to/python ./scripts/setup_venv.sh`
+if required.
+
+## Appendix: Releases
+
+- Update `CHANGELOG.md` with entries under the next version heading.
+- Bump the README version badge (if desired) and create a git tag, e.g.
+  `git tag v0.1.0 && git push origin v0.1.0`.
+- Keep release numbers aligned with Semantic Versioning.

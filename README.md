@@ -1,6 +1,7 @@
 # Repo Merger
 
 ![CI](https://github.com/rickhohler/repo-merger/actions/workflows/ci.yml/badge.svg)
+![Version](https://img.shields.io/badge/version-v0.1.0-blue)
 
 Tooling that consolidates multiple repository directories into a single workspace
 containing a **golden** copy (authoritative source) and **fragment** copies
@@ -93,5 +94,24 @@ Install dependencies (standard library only at the moment) and run tests with:
 ```bash
 python -m pytest
 ```
+
+## Local environment
+
+```bash
+./scripts/setup_venv.sh .venv
+source .venv/bin/activate
+python -m repo_merger run --help
+```
+
+The setup script creates a virtual environment (default `.venv`), upgrades pip,
+and installs dependencies from `requirements.txt` (currently `pytest` for the
+test suite). Use `PYTHON_BIN=/usr/bin/python3 ./scripts/setup_venv.sh` if you
+need a specific interpreter path.
+
+## Versioning & changelog
+
+This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+See `CHANGELOG.md` for release notes. Tag releases as `vMAJOR.MINOR.PATCH`
+(e.g., `v0.1.0`) once changes are merged to `main`.
 
 > CI: All pushes/PRs run `python -m pytest` via GitHub Actions (`.github/workflows/ci.yml`) on Python 3.12.
