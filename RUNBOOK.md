@@ -99,3 +99,29 @@ if required.
 - Bump the README version badge (if desired) and create a git tag, e.g.
   `git tag v0.1.0 && git push origin v0.1.0`.
 - Keep release numbers aligned with Semantic Versioning.
+
+## Appendix: Repo discovery helper
+
+`python -m repo_merger run --scan` scans `--scan-source` (default `~/REPOS`) for
+golden repos (`--scan-golden-pattern`, default `*golden*`) and fragments
+(`--scan-fragment-pattern`, default `fragment*`). Example:
+
+```bash
+python -m repo_merger run \
+  --workspace /var/tmp/repo-merger \
+  --scan \
+  --scan-source $HOME/REPOS \
+  --scan-create-structure \
+  --recover-missing \
+  --dry-run
+```
+
+Operator checklist:
+1. Populate `--scan-source` with the golden repo and fragment directories (or
+   let `--scan-create-structure` create it).
+2. Run the scan command with your desired flags (`--mode merge`, `--dry-run`,
+   etc.) to build workspaces and run analysis/merge for each detected golden
+   repo automatically.
+3. Inspect `scan_report.json` for classification decisions and
+   `scan_manifest.json` for ingestion history. Manually copy/update golden
+   repos inside the workspace as needed; subsequent scans remain idempotent.

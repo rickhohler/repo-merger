@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Sequence
+from typing import List, Sequence
 
+from .auto import ScanContext, ScanManifest, ScanReportEntry, scan_for_repos
 from .fragments import ingest_fragments, write_fragment_manifest
 from .handler_registry import HandlerRegistry
 from .inspection import FragmentAnalysis, inspect_fragments
@@ -42,7 +43,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--golden",
-        required=True,
+        required=False,
         type=Path,
         help="Path to the authoritative (golden) repository to mirror.",
     )
@@ -85,6 +86,31 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Resume merge mode from a specific fragment ID.",
     )
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Scan a directory for golden/fragment repos before executing.",
+    )
+    parser.add_argument(
+        "--scan-source",
+        type=Path,
+        help="Directory that contains golden/fragment repos for scanning.",
+    )
+    parser.add_argument(
+        "--scan-create-structure",
+        action="store_true",
+        help="Create the scan-source directory if it does not exist.",
+    )
+    parser.add_argument(
+        "--scan-golden-pattern",
+        default="*golden*",
+        help="Glob pattern to detect golden repos when scanning.",
+    )
+    parser.add_argument(
+        "--scan-fragment-pattern",
+        default="fragment*",
+        help="Glob pattern to detect fragment repos when scanning.",
+    )
 
 
 def _add_handler_arguments(parser: argparse.ArgumentParser) -> None:
@@ -117,12 +143,36 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _run_workspace_flow(args: argparse.Namespace) -> None:
-    golden_path = args.golden.expanduser().resolve()
+    scenario_registry = UnhandledScenarioRegistry(Path(__file__).resolve().parents[1])
     workspace_root = args.workspace.expanduser().resolve()
+
+    if not args.golden:
+        raise RepoMergerError("--golden is required for workspace runs.")
+
+    fragments = args.fragments or []
+    _process_single_run(
+        args=args,
+        workspace_root=workspace_root,
+        golden_path=args.golden,
+        fragments=fragments,
+        identifier_override=args.identifier,
+        scenario_registry=scenario_registry,
+    )
+
+
+def _process_single_run(
+    args: argparse.Namespace,
+    workspace_root: Path,
+    golden_path: Path,
+    fragments: Sequence[Path],
+    identifier_override: str | None,
+    scenario_registry: UnhandledScenarioRegistry,
+) -> None:
+    golden_path = golden_path.expanduser().resolve()
     logging.info("Golden repo: %s", golden_path)
     logging.info("Workspace root: %s", workspace_root)
 
-    identifier = derive_identifier(golden_path, args.identifier)
+    identifier = derive_identifier(golden_path, identifier_override)
     logging.info("Workspace identifier: %s", identifier)
 
     paths = prepare_workspace(
@@ -132,16 +182,25 @@ def _run_workspace_flow(args: argparse.Namespace) -> None:
         force=args.force,
     )
 
+    fragment_paths = _normalize_fragment_paths(fragments)
+    scan_context: ScanContext | None = None
+
+    if args.scan:
+        scan_context = _prepare_scan_context(args, paths, golden_path)
+        fragment_paths.extend(scan_context.fragments_to_ingest())
+        fragment_paths = _normalize_fragment_paths(fragment_paths)
+
     if args.dry_run:
         logging.info("Dry run enabled; skipping golden mirroring.")
     else:
         mirror_golden_repo(golden_path, paths.golden)
 
     records = []
-    scenario_registry = UnhandledScenarioRegistry(Path(__file__).resolve().parents[1])
-    if args.fragments:
-        records = ingest_fragments(args.fragments, paths, dry_run=args.dry_run)
+    if fragment_paths:
+        records = ingest_fragments(fragment_paths, paths, dry_run=args.dry_run)
         logging.info("Processed %d fragment(s)", len(records))
+    else:
+        logging.info("No fragments provided for ingestion.")
 
     if args.recover_missing and records:
         recovery_results = recover_fragments(records, paths, dry_run=args.dry_run)
@@ -177,6 +236,9 @@ def _run_workspace_flow(args: argparse.Namespace) -> None:
     else:
         raise RepoMergerError(f"Unsupported mode requested: {args.mode}")
 
+    if scan_context is not None:
+        scan_context.finalize_ingestion(records, identifier=identifier, dry_run=args.dry_run)
+
     logging.info("Workspace ready at %s", paths.root)
 
 
@@ -193,6 +255,93 @@ def _run_handler_flow(args: argparse.Namespace) -> None:
                 print(f"{meta.name}: {meta.description} [{meta.status}] -> {meta.doc_path}")
     else:
         raise RepoMergerError(f"Unknown handler command: {args.handler_command}")
+
+
+def _normalize_fragment_paths(paths: Sequence[Path]) -> List[Path]:
+    normalized: List[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        resolved = Path(path).expanduser().resolve()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(resolved)
+    return normalized
+
+
+def _prepare_scan_context(
+    args: argparse.Namespace,
+    paths: WorkspacePaths,
+    golden_path: Path,
+) -> ScanContext:
+    if not args.scan_source:
+        raise RepoMergerError("--scan-source is required when --scan is enabled")
+    scan_source = args.scan_source.expanduser().resolve()
+    if not scan_source.exists():
+        if args.scan_create_structure:
+            logging.info("Creating scan source directory at %s", scan_source)
+            scan_source.mkdir(parents=True, exist_ok=True)
+        else:
+            raise RepoMergerError(
+                f"Scan source directory does not exist: {scan_source}. "
+                "Use --scan-create-structure to create it."
+            )
+
+    candidates = scan_for_repos(
+        scan_source,
+        golden_pattern=args.scan_golden_pattern,
+        fragment_pattern=args.scan_fragment_pattern,
+        exclude=[paths.root],
+    )
+    manifest = ScanManifest(paths.root / "scan_manifest.json")
+    context = ScanContext(
+        manifest=manifest,
+        report_path=paths.root / "scan_report.json",
+    )
+
+    if not candidates:
+        logging.info("Scan found no repositories inside %s", scan_source)
+        return context
+
+    golden_resolved = golden_path.expanduser().resolve()
+    for candidate in candidates:
+        action = "ignored"
+        reason = candidate.reason
+
+        if candidate.classification == "fragment":
+            entry = manifest.lookup(candidate.path)
+            if entry and entry.get("digest") == candidate.digest:
+                action = "existing"
+                reason = "Fragment already ingested into workspace."
+            else:
+                context.add_pending_fragment(candidate)
+                action = "ingest"
+        elif candidate.classification == "golden":
+            if candidate.path.expanduser().resolve() == golden_resolved:
+                action = "workspace-golden"
+                reason = "Matches provided golden repository."
+            else:
+                action = "report"
+                reason = "Golden candidate detected; copy manually if desired."
+        else:
+            action = "unknown"
+
+        context.add_report_entry(
+            ScanReportEntry(
+                source=str(candidate.path),
+                classification=candidate.classification,
+                confidence=candidate.confidence,
+                action=action,
+                reason=reason,
+            )
+        )
+
+    logging.info(
+        "Scan identified %d fragment candidate(s) awaiting ingestion.",
+        len(context.pending_fragments),
+    )
+    return context
 
 
 def _emit_report(

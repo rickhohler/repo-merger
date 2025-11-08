@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repo-merger"
+version = "0.1.0"
+description = "Tooling to consolidate golden and fragment repositories"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+  {name = "Rick Hohler"}
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9.0"]
+
+[project.scripts]
+repo-merger = "repo_merger.cli:main"

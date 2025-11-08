@@ -100,13 +100,60 @@ python -m pytest
 ```bash
 ./scripts/setup_venv.sh .venv
 source .venv/bin/activate
-python -m repo_merger run --help
+pip install -e .            # optional, installs CLI entry point
+repo-merger run --help      # or: python -m repo_merger run --help
 ```
 
 The setup script creates a virtual environment (default `.venv`), upgrades pip,
 and installs dependencies from `requirements.txt` (currently `pytest` for the
 test suite). Use `PYTHON_BIN=/usr/bin/python3 ./scripts/setup_venv.sh` if you
-need a specific interpreter path.
+need a specific interpreter path. Installing the project with `pip install -e .`
+exposes the `repo-merger` console script via entry points.
+
+### Scanning directories for golden/fragment repos
+
+Use the `--scan` option to auto-detect repositories before running analyze or
+merge modes:
+
+```bash
+python -m repo_merger run \
+  --workspace $HOME/REPOS/repo-merger-workspaces \
+  --scan \
+  --scan-source $HOME/REPOS \
+  --scan-create-structure \
+  --scan-golden-pattern "*golden*" \
+  --scan-fragment-pattern "fragment*" \
+  --dry-run
+```
+
+Workflow:
+1. Point `--scan-source` (default `~/REPOS`) at a directory containing your
+   repos. Enable `--scan-create-structure` to create it if missing.
+2. Ensure the golden repo names match `--scan-golden-pattern` (default
+   `*golden*`). Fragments should match `--scan-fragment-pattern` (default
+   `fragment*`).
+3. Run the command above (append regular flags such as `--mode merge`,
+   `--recover-missing`, etc.). The CLI will create workspaces for each detected
+   golden repo and ingest its fragments automatically.
+4. Review `scan_report.json` and `scan_manifest.json` inside each workspace to
+   see what was discovered, ingested, or skipped. Re-running the scan is
+   idempotent; previously ingested fragments are skipped unless their content
+   changes.
+
+### Preparing workspaces in bulk
+
+Use `scripts/prepare_repo_workspaces.sh` to scan `REPOS_SOURCES`, create the
+expected workspace layout inside `WORKSPACES_ROOT`, and run repo-merger for each
+golden repo:
+
+```bash
+REPOS_SOURCES=$HOME/REPOS \
+WORKSPACES_ROOT=$HOME/REPOS/repo-merger-workspaces \
+./scripts/prepare_repo_workspaces.sh --dry-run
+```
+
+Additional flags/overrides (e.g., `--mode merge`, `GOLDEN_PATTERN=my-golden`) can
+be provided just like the discovery script.
 
 ## Versioning & changelog
 
