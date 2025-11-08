@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 from repo_merger.auto import (
     ScanCandidate,
@@ -37,6 +38,23 @@ def test_scan_for_repos_classifies_golden_and_fragment(tmp_path: Path) -> None:
         fragment_pattern="fragment*",
     )
     assert {c.classification for c in candidates} == {"golden", "fragment"}
+
+
+def test_scan_detects_bare_golden(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    bare = source / "proj.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    candidates = scan_for_repos(
+        source,
+        golden_pattern="*",
+        fragment_pattern="fragment*",
+    )
+
+    bare_candidate = next((c for c in candidates if c.path == bare), None)
+    assert bare_candidate is not None
+    assert bare_candidate.classification == "golden"
 
 
 def test_scan_manifest_records_ingestion(tmp_path: Path) -> None:

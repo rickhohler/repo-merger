@@ -23,13 +23,14 @@ python -m repo_merger run \
 Key flags:
 
 - `--workspace`: directory that will hold the merged workspace(s).
-- `--golden`: local path to the complete repository you trust the most.
+- `--golden`: local path to the complete repository you trust the most (optional when using `--scan`).
 - `--fragment`: optional partial copies to mirror into the workspace (repeatable).
 - `--identifier`: override the derived workspace identifier (defaults to origin slug).
 - `--mode`: `analyze` (default) or `merge` for applying fragment changes via git worktrees.
 - `--force`: allow overwriting an existing workspace directory.
 - `--recover-missing`: recover fragments without `.git/` metadata into synthetic repos.
 - `--resume-from`: resume `--mode merge` at a particular fragment ID.
+- `--scan`, `--scan-source`, `--scan-golden-pattern`, `--scan-fragment-pattern`: auto-discover golden and fragment repos in arbitrary directories.
 - `--dry-run`: log the planned filesystem actions without writing.
 - `--verbose`: enable debug logging for troubleshooting.
 
@@ -113,7 +114,8 @@ exposes the `repo-merger` console script via entry points.
 ### Scanning directories for golden/fragment repos
 
 Use the `--scan` option to auto-detect repositories before running analyze or
-merge modes:
+merge modes. If you omit `--golden`, every golden repository discovered during
+the scan is mirrored into its own workspace identifier automatically:
 
 ```bash
 python -m repo_merger run \
@@ -129,16 +131,27 @@ python -m repo_merger run \
 Workflow:
 1. Point `--scan-source` (default `~/REPOS`) at a directory containing your
    repos. Enable `--scan-create-structure` to create it if missing.
-2. Ensure the golden repo names match `--scan-golden-pattern` (default
-   `*golden*`). Fragments should match `--scan-fragment-pattern` (default
-   `fragment*`).
+2. Adjust `--scan-golden-pattern` / `--scan-fragment-pattern` as needed. If your
+   directories are not named clearly, you can pass wildcards such as `"*"` and
+   let the `.git` heuristics classify each repo (bare repositories are treated
+   as goldens automatically).
 3. Run the command above (append regular flags such as `--mode merge`,
-   `--recover-missing`, etc.). The CLI will create workspaces for each detected
-   golden repo and ingest its fragments automatically.
+   `--recover-missing`, etc.). The CLI will create or reuse workspaces for each
+   detected golden repo and ingest any new fragments automatically. Bare
+   repositories are cloned into working trees before analysis so they can be
+   compared like non-bare repos.
 4. Review `scan_report.json` and `scan_manifest.json` inside each workspace to
-   see what was discovered, ingested, or skipped. Re-running the scan is
-   idempotent; previously ingested fragments are skipped unless their content
-   changes.
+   see what was discovered, ingested, or skipped (including classifications of
+   “likely golden” vs “fragment”). Re-running the scan is idempotent; previously
+   ingested fragments are skipped unless their content changes.
+
+### Bare repositories
+
+Scans detect both non-bare and bare Git repositories. When a bare repository is
+selected as a golden candidate, repo-merger clones it into the workspace to
+produce a working tree before running analysis/merge. Bare fragments are logged
+with lower confidence and require operator approval (e.g., via
+`--recover-missing`) before ingestion.
 
 ### Preparing workspaces in bulk
 

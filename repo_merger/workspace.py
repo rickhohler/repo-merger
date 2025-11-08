@@ -4,10 +4,12 @@ import configparser
 import logging
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from .gitutils import clone_repo, is_bare_repo
 
 class RepoMergerError(Exception):
     """Base exception for workspace preparation errors."""
@@ -81,17 +83,28 @@ def mirror_golden_repo(
         if any(destination.iterdir()):
             if replace:
                 shutil.rmtree(destination)
-                destination.mkdir(parents=True, exist_ok=True)
             else:
                 logging.info(
                     "Golden destination already populated at %s; skipping mirror.", destination
                 )
                 return
-    else:
-        destination.mkdir(parents=True, exist_ok=True)
 
-    logging.info("Copying golden repository into %s", destination)
-    shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
+    if destination.exists():
+        shutil.rmtree(destination)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if is_bare_repo(source):
+        logging.info("Cloning bare repository from %s", source)
+        try:
+            clone_repo(source, destination)
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - rare
+            raise RepoMergerError(
+                f"git clone failed for bare repository {source}: {exc.stderr.strip()}"
+            ) from exc
+    else:
+        logging.info("Copying golden repository into %s", destination)
+        shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
 
 
 def _identifier_from_config(config_path: Path) -> Optional[str]:

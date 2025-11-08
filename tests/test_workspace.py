@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -71,3 +72,20 @@ def test_prepare_workspace_respects_force_flag(tmp_path: Path) -> None:
 
     # With force=True the directories are recreated
     prepare_workspace(workspace, "demo", dry_run=False, force=True)
+
+
+def test_mirror_golden_repo_handles_bare(tmp_path: Path) -> None:
+    bare = tmp_path / "bare.git"
+    subprocess.run(
+        ["git", "init", "--bare", str(bare)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    destination = tmp_path / "workspace" / "demo" / "golden"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    mirror_golden_repo(bare, destination, dry_run=False, replace=True)
+
+    assert (destination / ".git").is_dir()

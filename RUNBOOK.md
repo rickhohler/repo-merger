@@ -15,6 +15,10 @@ python -m repo_merger run \
   --recover-missing
 ```
 
+> Tip: When using `--scan` you may omit `--golden`; the CLI will discover each
+> golden repository under `--scan-source` and build the workspace structure
+> automatically.
+
 Key notes:
 - The command mirrors the golden repo into `<workspace>/<identifier>/golden/`.
 - Fragments are copied under `fragments/<fragment-id>/`.
@@ -120,8 +124,9 @@ Operator checklist:
 1. Populate `--scan-source` with the golden repo and fragment directories (or
    let `--scan-create-structure` create it).
 2. Run the scan command with your desired flags (`--mode merge`, `--dry-run`,
-   etc.) to build workspaces and run analysis/merge for each detected golden
-   repo automatically.
-3. Inspect `scan_report.json` for classification decisions and
-   `scan_manifest.json` for ingestion history. Manually copy/update golden
-   repos inside the workspace as needed; subsequent scans remain idempotent.
+   etc.). Each detected golden repo (bare or non-bare) is mirrored into its own
+   workspace identifier and any new fragments are ingested automatically.
+3. Inspect `scan_report.json` for classification decisions (including bare
+   repo detections) and `scan_manifest.json` for ingestion history. Manually
+   copy/update golden repos inside the workspace as needed; subsequent scans
+   remain idempotent.

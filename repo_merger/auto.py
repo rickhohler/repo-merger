@@ -9,6 +9,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Dict, Iterable, List, Literal, Sequence
 
+from .gitutils import has_git_dir, has_remote_from_config, is_bare_repo, read_git_config
 from .workspace import RepoMergerError
 
 ScanClassification = Literal["golden", "fragment", "unknown"]
@@ -174,7 +175,7 @@ def _looks_like_repo(path: Path, golden_pattern: str, fragment_pattern: str) -> 
     name = path.name
     if fnmatch(name, golden_pattern) or fnmatch(name, fragment_pattern):
         return True
-    return (path / ".git").is_dir()
+    return has_git_dir(path) or is_bare_repo(path)
 
 
 def _classify_repo(
@@ -197,12 +198,21 @@ def _classify_repo(
     git_dir = path / ".git"
     if git_dir.is_dir():
         score_golden += 2
-        if _has_remote(git_dir):
+        config_text = read_git_config(git_dir / "config")
+        if has_remote_from_config(config_text):
             score_golden += 1
             reasons.append("git-remote-found")
         else:
             score_fragment += 1
             reasons.append("git-metadata-no-remote")
+    elif is_bare_repo(path):
+        score_golden += 3
+        config_text = read_git_config(path / "config")
+        if has_remote_from_config(config_text):
+            score_golden += 1
+            reasons.append("bare-repo-with-remote")
+        else:
+            reasons.append("bare-repo")
     else:
         score_fragment += 1
         reasons.append("missing-git-directory")
@@ -217,17 +227,6 @@ def _classify_repo(
     confidence = min(1.0, abs(score_golden - score_fragment) / 4.0)
     reason = ",".join(reasons) or "no-heuristics"
     return classification, confidence, reason
-
-
-def _has_remote(git_dir: Path) -> bool:
-    config = git_dir / "config"
-    if not config.is_file():
-        return False
-    try:
-        content = config.read_text()
-    except OSError:
-        return False
-    return 'remote "origin"' in content or "url =" in content
 
 
 def _hash_directory(path: Path) -> str:

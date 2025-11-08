@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file and follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Packaged entry point (`pyproject.toml`, `python -m repo_merger`).
+- Recursive `--scan` workflow that detects both bare and non-bare golden repos,
+  generates `scan_report.json`/`scan_manifest.json`, and ingests only new
+  fragments into workspaces.
+- Bare repository detection during scanning and mirroring (bare goldens are
+  cloned into working trees automatically).
+
+### Changed
+- Workspace preparation reuses existing directories unless `--force` is passed,
+  keeping scans idempotent across runs.
+
 ## [0.1.0] - 2025-11-07
 
 ### Added

@@ -53,7 +53,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--golden",
         required=False,
         type=Path,
-        help="Path to the authoritative (golden) repository to mirror.",
+        help="Path to the authoritative (golden) repository to mirror (optional if --scan is used).",
     )
     parser.add_argument(
         "--fragment",
@@ -219,10 +219,12 @@ def _process_single_run(
         fragment_paths.extend(scan_context.fragments_to_ingest())
         fragment_paths = _normalize_fragment_paths(fragment_paths)
 
-    if args.dry_run:
-        logging.info("Dry run enabled; skipping golden mirroring.")
-    else:
-        mirror_golden_repo(golden_path, paths.golden, dry_run=False, replace=args.force)
+    mirror_golden_repo(
+        golden_path,
+        paths.golden,
+        dry_run=args.dry_run,
+        replace=args.force,
+    )
 
     records = []
     if fragment_paths:
