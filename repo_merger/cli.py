@@ -18,7 +18,7 @@ from .auto import (
     ScanReportEntry,
     scan_for_repos,
 )
-from .fragments import ingest_fragments, write_fragment_manifest
+from .fragments import FragmentRecord, ingest_fragments, write_fragment_manifest
 from .gitutils import (
     clone_repo,
     git_has_commit,
@@ -295,12 +295,13 @@ def _process_single_run(
         replace=args.force,
     )
 
-    records = []
+    records: List[FragmentRecord] = []
     if fragment_paths:
         records = ingest_fragments(fragment_paths, paths, dry_run=args.dry_run)
         logging.info("Processed %d fragment(s)", len(records))
     else:
         logging.info("No fragments provided for ingestion.")
+    ingested_count = sum(1 for record in records if record.copied)
 
     if args.recover_missing and records:
         recovery_results = recover_fragments(records, paths, dry_run=args.dry_run)
@@ -340,7 +341,7 @@ def _process_single_run(
         scan_context.finalize_ingestion(records, identifier=identifier, dry_run=args.dry_run)
 
     logging.info("Workspace ready at %s", paths.root)
-    return len(records), golden_status
+    return ingested_count, golden_status
 
 
 def _run_handler_flow(args: argparse.Namespace) -> None:

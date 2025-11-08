@@ -21,6 +21,7 @@ class FragmentRecord:
     timestamp: str
     has_git: bool
     recovered_repo: str | None = None
+    copied: bool = False
 
 
 def ingest_fragments(
@@ -57,6 +58,7 @@ def _ingest_single(
     source_type = _classify_fragment(fragment)
     has_git = source_type == "git"
     timestamp = datetime.now(timezone.utc).isoformat()
+    copied = False
 
     if dry_run:
         logging.info(
@@ -67,16 +69,19 @@ def _ingest_single(
         )
     else:
         if destination.exists():
-            raise RepoMergerError(
-                f"Fragment destination already exists (collision?): {destination}"
+            logging.info(
+                "Fragment destination already exists at %s; treating as previously ingested.",
+                destination,
             )
-        if fragment.is_dir():
-            logging.info("Copying fragment directory %s -> %s", fragment, destination)
-            shutil.copytree(fragment, destination, symlinks=True)
         else:
-            logging.info("Copying fragment file %s -> %s", fragment, destination)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(fragment, destination)
+            if fragment.is_dir():
+                logging.info("Copying fragment directory %s -> %s", fragment, destination)
+                shutil.copytree(fragment, destination, symlinks=True)
+            else:
+                logging.info("Copying fragment file %s -> %s", fragment, destination)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(fragment, destination)
+            copied = True
 
     return FragmentRecord(
         fragment_id=fragment_id,
@@ -85,6 +90,7 @@ def _ingest_single(
         source_type=source_type,
         timestamp=timestamp,
         has_git=has_git,
+        copied=copied,
     )
 
 
