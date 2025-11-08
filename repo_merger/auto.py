@@ -104,7 +104,6 @@ class ScanContext:
             for entry in self.report_entries:
                 if entry.action == "ingest":
                     entry.action = "dry-run"
-            self._write_report()
             return
 
         for record in records:

@@ -101,7 +101,7 @@ def list_user_repos(limit: int | None = None, *, visibility: str | None = None) 
         "repo",
         "list",
         "--json",
-        "nameWithOwner,name,sshUrl,url,isPrivate",
+        "nameWithOwner,name,sshUrl,url,isPrivate,isFork",
     ]
     if limit:
         cmd += ["--limit", str(limit)]

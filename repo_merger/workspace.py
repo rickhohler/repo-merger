@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .gitutils import clone_repo, is_bare_repo
+from .gitutils import clone_repo, is_bare_repo, run_git
 
 class RepoMergerError(Exception):
     """Base exception for workspace preparation errors."""
@@ -32,7 +32,10 @@ def derive_identifier(golden_path: Path, explicit: Optional[str] = None) -> str:
         if identifier:
             return identifier
 
-    fallback = golden_path.name or "workspace"
+    name = golden_path.name
+    if name.endswith(".git"):
+        name = name[:-4]
+    fallback = name or "workspace"
     return _sanitize(fallback)
 
 
@@ -80,15 +83,16 @@ def mirror_golden_repo(
     *,
     dry_run: bool = False,
     replace: bool = False,
-) -> None:
+) -> str:
     source = source.expanduser()
     if not source.exists():
         raise RepoMergerError(f"Golden repository path does not exist: {source}")
 
     if dry_run:
-        logging.info("Dry run: would mirror %s -> %s", source, destination)
-        return
+        logging.info("Dry run: would clone %s -> %s", source, destination)
+        return "dry-run"
 
+    status = "installed"
     if destination.exists():
         if not destination.is_dir():
             raise RepoMergerError(
@@ -97,11 +101,12 @@ def mirror_golden_repo(
         if any(destination.iterdir()):
             if replace:
                 shutil.rmtree(destination)
+                status = "replaced"
             else:
                 logging.info(
                     "Golden destination already populated at %s; skipping mirror.", destination
                 )
-                return
+                return "existing"
 
     if destination.exists():
         shutil.rmtree(destination)
@@ -112,13 +117,30 @@ def mirror_golden_repo(
         logging.info("Cloning bare repository from %s", source)
         try:
             clone_repo(source, destination)
+            _ensure_checkout_branch(destination)
         except subprocess.CalledProcessError as exc:  # pragma: no cover - rare
-            raise RepoMergerError(
-                f"git clone failed for bare repository {source}: {exc.stderr.strip()}"
-            ) from exc
+            logging.warning(
+                "git clone failed for bare repository %s: %s",
+                source,
+                exc.stderr.strip(),
+            )
+            return "failed"
     else:
-        logging.info("Copying golden repository into %s", destination)
+        logging.info("Cloning golden repository into %s", destination)
         shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
+
+    return status
+
+
+def _ensure_checkout_branch(repo: Path) -> None:
+    result = run_git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if result.returncode == 0 and result.stdout.strip() != "HEAD":
+        return
+    for candidate in ("main", "master"):
+        if run_git(repo, ["rev-parse", "--verify", candidate]).returncode == 0:
+            checkout = run_git(repo, ["checkout", candidate])
+            if checkout.returncode == 0:
+                return
 
 
 def _identifier_from_config(config_path: Path) -> Optional[str]:

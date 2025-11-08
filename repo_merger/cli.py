@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
@@ -163,6 +164,11 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Include private repositories when using --golden-gh-pull (requires gh auth).",
     )
+    parser.add_argument(
+        "--golden-gh-pull-include-forks",
+        action="store_true",
+        help="Include forks when using --golden-gh-pull (default skips forks).",
+    )
 
 
 def _add_handler_arguments(parser: argparse.ArgumentParser) -> None:
@@ -217,8 +223,9 @@ def _run_workspace_flow(args: argparse.Namespace) -> None:
         scan_runs = _build_scan_runs(args, workspace_root)
         if not scan_runs:
             raise RepoMergerError("Scan did not identify any golden repositories.")
+        scan_stats: Counter[str] = Counter()
         for run in scan_runs:
-            _process_single_run(
+            ingested, golden_status = _process_single_run(
                 args=args,
                 workspace_root=workspace_root,
                 golden_path=run.golden,
@@ -227,6 +234,11 @@ def _run_workspace_flow(args: argparse.Namespace) -> None:
                 scenario_registry=scenario_registry,
                 scan_context=run.context,
             )
+            scan_stats["goldens"] += 1
+            scan_stats["pending-fragments"] += len(run.context.pending_fragments)
+            scan_stats["fragments-ingested"] += ingested
+            scan_stats[f"golden-{golden_status}"] += 1
+        _log_scan_summary(scan_stats, dry_run=args.dry_run)
         return
 
     if not args.golden:
@@ -256,7 +268,7 @@ def _process_single_run(
     explicit_identifier: str | None,
     scenario_registry: UnhandledScenarioRegistry,
     scan_context: ScanContext | None,
-) -> None:
+) -> int:
     golden_path = golden_path.expanduser().resolve()
     logging.info("Golden repo: %s", golden_path)
     logging.info("Workspace root: %s", workspace_root)
@@ -276,7 +288,7 @@ def _process_single_run(
         fragment_paths.extend(scan_context.fragments_to_ingest())
         fragment_paths = _normalize_fragment_paths(fragment_paths)
 
-    mirror_golden_repo(
+    golden_status = mirror_golden_repo(
         golden_path,
         paths.golden,
         dry_run=args.dry_run,
@@ -328,6 +340,7 @@ def _process_single_run(
         scan_context.finalize_ingestion(records, identifier=identifier, dry_run=args.dry_run)
 
     logging.info("Workspace ready at %s", paths.root)
+    return len(records), golden_status
 
 
 def _run_handler_flow(args: argparse.Namespace) -> None:
@@ -366,12 +379,19 @@ def _run_golden_gh_pull(args: argparse.Namespace, workspace_root: Path) -> None:
         raise RepoMergerError(str(exc)) from exc
 
     pattern = args.golden_gh_pull_pattern or "*"
-    matched = [repo for repo in repos if _match_repo(repo, pattern)]
+    matched = [
+        repo
+        for repo in repos
+        if _match_repo(repo, pattern)
+        and (args.golden_gh_pull_include_forks or not repo.get("isFork"))
+    ]
     if not matched:
         logging.info("golden-gh-pull: no repositories matched pattern '%s'", pattern)
         return
 
     if args.dry_run:
+        stats = Counter({"matched": len(matched)})
+        logging.info("golden-gh-pull dry run: %d repo(s) matched.", len(matched))
         for repo in matched:
             identifier = sanitize_identifier(repo["nameWithOwner"].replace("/", "-"))
             logging.info(
@@ -379,37 +399,47 @@ def _run_golden_gh_pull(args: argparse.Namespace, workspace_root: Path) -> None:
                 repo["nameWithOwner"],
                 workspace_root / identifier / "golden",
             )
+        _log_golden_summary(stats, dry_run=True)
         return
 
     protocol_field = "sshUrl" if args.golden_gh_pull_protocol == "ssh" else "url"
+    stats: Counter[str] = Counter()
+    stats["matched"] = len(matched)
 
     for repo in matched:
         repo_url = repo.get(protocol_field)
         if not repo_url:
             logging.warning("Skipping %s; missing %s", repo["nameWithOwner"], protocol_field)
+            stats["missing-url"] += 1
             continue
         identifier = sanitize_identifier(repo["nameWithOwner"].replace("/", "-"))
         paths = ensure_workspace_dirs(workspace_root, identifier)
-        with tempfile.TemporaryDirectory(prefix="golden-gh-pull-") as tmpdir:
-            clone_target = Path(tmpdir) / "repo"
-            logging.info("Cloning %s", repo["nameWithOwner"])
-            clone_repo(repo_url, clone_target)
-            status, reason = _evaluate_golden_candidate(paths.golden, clone_target)
-            logging.info(
-                "Golden pull %s: %s (%s)", repo["nameWithOwner"], status, reason
-            )
-            if status in {"install", "replace"}:
-                _install_golden(paths.golden, clone_target)
-            elif status == "identical":
-                continue
-            elif status == "keep":
-                logging.info("Keeping existing golden for %s", repo["nameWithOwner"])
-            elif status == "diverged":
-                logging.warning(
-                    "Golden at %s diverged from %s; skipping replacement.",
-                    paths.golden,
-                    repo["nameWithOwner"],
+        try:
+            with tempfile.TemporaryDirectory(prefix="golden-gh-pull-") as tmpdir:
+                clone_target = Path(tmpdir) / "repo"
+                logging.info("Cloning %s", repo["nameWithOwner"])
+                clone_repo(repo_url, clone_target)
+                status, reason = _evaluate_golden_candidate(paths.golden, clone_target)
+                logging.info(
+                    "Golden pull %s: %s (%s)", repo["nameWithOwner"], status, reason
                 )
+                stats[status] += 1
+                if status in {"install", "replace"}:
+                    _install_golden(paths.golden, clone_target)
+                elif status == "keep":
+                    logging.info("Keeping existing golden for %s", repo["nameWithOwner"])
+                elif status == "diverged":
+                    logging.warning(
+                        "Golden at %s diverged from %s; skipping replacement.",
+                        paths.golden,
+                        repo["nameWithOwner"],
+                    )
+                # identical status simply records that the workspace already matches
+        except Exception as exc:  # pragma: no cover - unexpected runtime error
+            logging.error("golden-gh-pull failed for %s: %s", repo["nameWithOwner"], exc)
+            stats["errors"] += 1
+
+    _log_golden_summary(stats, dry_run=False)
 
 
 def _match_repo(repo: dict, pattern: str) -> bool:
@@ -449,6 +479,64 @@ def _evaluate_golden_candidate(existing: Path, candidate: Path) -> tuple[str, st
         return "keep", "Workspace golden ahead of remote"
 
     return "diverged", "Histories diverged"
+
+
+def _log_golden_summary(stats: Counter[str], *, dry_run: bool) -> None:
+    title = "Golden GH Pull Summary (dry-run)" if dry_run else "Golden GH Pull Summary"
+    categories = [
+        ("Repos found", stats.get("matched", 0), "matching repositories owned by the user"),
+        ("Installed", stats.get("install", 0), "no prior golden in the workspace"),
+        ("Replaced", stats.get("replace", 0), "GitHub copy had newer commits"),
+        ("Identical", stats.get("identical", 0), "workspace already matched GitHub"),
+        ("Kept", stats.get("keep", 0), "workspace golden was ahead"),
+        ("Diverged", stats.get("diverged", 0), "histories differ; manual review"),
+        ("Missing URL", stats.get("missing-url", 0), "gh output lacked ssh/https URL"),
+        ("Errors", stats.get("errors", 0), "clone or comparison failed"),
+    ]
+
+    lines = ["", title, "-" * len(title)]
+    width = max(len(label) for label, _, _ in categories)
+    for label, value, description in categories:
+        lines.append(f"{label:<{width}} : {value} ({description})")
+    logging.info("\n".join(lines))
+
+
+def _log_scan_summary(stats: Counter[str], *, dry_run: bool) -> None:
+    title = "Scan Summary (dry-run)" if dry_run else "Scan Summary"
+    categories = [
+        ("Goldens found", stats.get("goldens", 0), "repositories discovered in scan"),
+        (
+            "Fragments pending",
+            stats.get("pending-fragments", 0),
+            "fragment candidates awaiting ingestion",
+        ),
+        (
+            "Fragments ingested",
+            stats.get("fragments-ingested", 0),
+            "fragments copied into workspace",
+        ),
+        (
+            "Goldens installed",
+            stats.get("golden-installed", 0) + stats.get("golden-replaced", 0),
+            "goldens cloned into the workspace",
+        ),
+        (
+            "Goldens existing",
+            stats.get("golden-existing", 0),
+            "workspace already contained these goldens",
+        ),
+        (
+            "Goldens replaced",
+            stats.get("golden-replaced", 0),
+            "existing goldens overwritten due to --force",
+        ),
+    ]
+
+    lines = ["", title, "-" * len(title)]
+    width = max(len(label) for label, _, _ in categories)
+    for label, value, description in categories:
+        lines.append(f"{label:<{width}} : {value} ({description})")
+    logging.info("\n".join(lines))
 
 
 def _build_scan_runs(args: argparse.Namespace, workspace_root: Path) -> List[ScanRunConfig]:

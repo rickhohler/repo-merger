@@ -188,15 +188,17 @@ python -m repo_merger run \
   --recover-missing
 ```
 
-- `--golden-gh-pull` enumerates the current user’s repositories via `gh repo list` and
-  clones each one (all branches/history) under
-  `<workspace>/<identifier>/golden/`. Identifiers are derived from the remote
-  URL or repo name.
+- `--golden-gh-pull` enumerates the current user’s repositories via `gh repo list`,
+  skipping forks by default (pass `--golden-gh-pull-include-forks` to override), and clones each one (all branches/history) under
+  `<workspace>/<identifier>/golden/`. Identifiers are derived from the remote URL or repo name.
 - If a workspace already has that golden, repo-merger compares commit history:
   identical repos are skipped, newer GitHub copies replace the workspace, and
   older/diverged copies are reported but left untouched.
 - Combine with `--scan` to ingest fragments after the golden pull without
   manually copying directories.
+
+Each run ends with a summary showing how many repositories were installed,
+replaced, kept, or skipped so you can quickly review the outcome.
 
 > Requires `gh auth login` first. Use `--golden-gh-pull-pattern` (glob) and
 > `--golden-gh-pull-limit` (default 2000) to control which repositories are cloned.

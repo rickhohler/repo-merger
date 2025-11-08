@@ -227,10 +227,15 @@ def _build_manifest(root: Path) -> List[FileManifestEntry]:
         if ".git" in item.parts:
             continue
         relative = item.relative_to(root)
+        try:
+            size = item.stat().st_size
+        except FileNotFoundError:
+            logging.warning("Skipping missing file during manifest build: %s", item)
+            continue
         entries.append(
             FileManifestEntry(
                 path=str(relative),
-                size=item.stat().st_size,
+                size=size,
                 sha256=_sha256(item),
             )
         )
