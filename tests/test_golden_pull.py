@@ -16,6 +16,8 @@ def init_repo(path: Path) -> None:
 def commit_file(path: Path, filename: str, content: str) -> None:
     file_path = path / filename
     file_path.write_text(content)
+    subprocess.run(["git", "config", "user.name", "tester"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "tester@example.com"], cwd=path, check=True)
     subprocess.run(["git", "add", filename], cwd=path, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     subprocess.run(["git", "commit", "-m", content], cwd=path, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
