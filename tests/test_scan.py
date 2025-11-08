@@ -14,7 +14,7 @@ from repo_merger.auto import (
     ScanReportEntry,
     scan_for_repos,
 )
-from repo_merger.cli import _log_scan_summary
+from repo_merger.cli import _log_scan_summary, _write_scan_status_files
 
 
 def make_git_repo(path: Path, has_remote: bool = True) -> None:
@@ -118,3 +118,34 @@ def test_log_scan_summary_reports_failed_goldens(caplog: pytest.LogCaptureFixtur
     _log_scan_summary(stats, dry_run=False)
 
     assert "Goldens failed" in caplog.text
+
+
+def test_write_scan_status_files_accumulates(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    success_paths = [tmp_path / "done-a", tmp_path / "done-b"]
+    failure_paths = [tmp_path / "failed-a"]
+
+    _write_scan_status_files(
+        workspace,
+        success_paths=success_paths,
+        failure_paths=failure_paths,
+    )
+
+    succeeded = sorted((workspace / "scan_succeeded.txt").read_text().splitlines())
+    failed = sorted((workspace / "scan_failed.txt").read_text().splitlines())
+
+    assert succeeded == sorted(str(path) for path in success_paths)
+    assert failed == sorted(str(path) for path in failure_paths)
+
+    extra_success = [tmp_path / "done-a", tmp_path / "done-c"]
+    _write_scan_status_files(
+        workspace,
+        success_paths=extra_success,
+        failure_paths=[],
+    )
+
+    resumed = sorted((workspace / "scan_succeeded.txt").read_text().splitlines())
+    assert resumed == sorted(
+        {str(path) for path in success_paths + extra_success}
+    )

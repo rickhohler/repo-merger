@@ -296,11 +296,26 @@ def _process_single_run(
     )
 
     records: List[FragmentRecord] = []
+    success_paths: List[Path] = []
+    failure_paths: List[Path] = []
+    if not args.dry_run:
+        if golden_status == "failed":
+            failure_paths.append(golden_path)
+        else:
+            success_paths.append(golden_path)
+    failure_fragments: List[Path] = []
     if fragment_paths:
-        records = ingest_fragments(fragment_paths, paths, dry_run=args.dry_run)
-        logging.info("Processed %d fragment(s)", len(records))
+        try:
+            records = ingest_fragments(fragment_paths, paths, dry_run=args.dry_run)
+        except RepoMergerError as exc:  # pragma: no cover - unexpected failure
+            logging.error("Fragment ingestion failed: %s", exc)
+            failure_fragments = fragment_paths
+        else:
+            logging.info("Processed %d fragment(s)", len(records))
+            success_paths.extend(Path(record.source) for record in records)
     else:
         logging.info("No fragments provided for ingestion.")
+    failure_paths.extend(failure_fragments)
     ingested_count = sum(1 for record in records if record.copied)
 
     if args.recover_missing and records:
@@ -341,6 +356,12 @@ def _process_single_run(
         scan_context.finalize_ingestion(records, identifier=identifier, dry_run=args.dry_run)
 
     logging.info("Workspace ready at %s", paths.root)
+    if scan_context is not None and not args.dry_run:
+        _write_scan_status_files(
+            paths.root,
+            success_paths=success_paths,
+            failure_paths=failure_paths,
+        )
     return ingested_count, golden_status
 
 
@@ -543,6 +564,32 @@ def _log_scan_summary(stats: Counter[str], *, dry_run: bool) -> None:
     for label, value, description in categories:
         lines.append(f"{label:<{width}} : {value} ({description})")
     logging.info("\n".join(lines))
+
+
+def _write_scan_status_files(
+    workspace_root: Path,
+    *,
+    success_paths: Sequence[Path],
+    failure_paths: Sequence[Path],
+) -> None:
+    _update_status_file(workspace_root / "scan_succeeded.txt", success_paths)
+    _update_status_file(workspace_root / "scan_failed.txt", failure_paths)
+
+
+def _update_status_file(path: Path, entries: Sequence[Path]) -> None:
+    additions = {str(entry) for entry in entries if entry}
+    if not additions:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = set()
+    if path.exists():
+        existing = {
+            line.strip()
+            for line in path.read_text().splitlines()
+            if line.strip()
+        }
+    combined = sorted(existing | additions)
+    path.write_text("\n".join(combined) + "\n")
 
 
 def _build_scan_runs(args: argparse.Namespace, workspace_root: Path) -> List[ScanRunConfig]:
