@@ -87,6 +87,7 @@ class ScanManifest:
 class ScanContext:
     manifest: ScanManifest
     report_path: Path
+    source_identifier: str
     report_entries: List[ScanReportEntry] = field(default_factory=list)
     pending_fragments: Dict[str, ScanCandidate] = field(default_factory=dict)
 

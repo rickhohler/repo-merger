@@ -79,7 +79,11 @@ def test_scan_manifest_records_ingestion(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     manifest = ScanManifest(workspace / "scan_manifest.json")
-    context = ScanContext(manifest=manifest, report_path=workspace / "scan_report.json")
+    context = ScanContext(
+        manifest=manifest,
+        report_path=workspace / "scan_report.json",
+        source_identifier="test-source",
+    )
     context.add_pending_fragment(candidate)
     context.add_report_entry(
         ScanReportEntry(
@@ -125,27 +129,40 @@ def test_write_scan_status_files_accumulates(tmp_path: Path) -> None:
     workspace.mkdir()
     success_paths = [tmp_path / "done-a", tmp_path / "done-b"]
     failure_paths = [tmp_path / "failed-a"]
+    source_identifier = "usb-drive"
 
     _write_scan_status_files(
         workspace,
         success_paths=success_paths,
         failure_paths=failure_paths,
+        source_identifier=source_identifier,
     )
 
     succeeded = sorted((workspace / "scan_succeeded.txt").read_text().splitlines())
     failed = sorted((workspace / "scan_failed.txt").read_text().splitlines())
 
-    assert succeeded == sorted(str(path) for path in success_paths)
-    assert failed == sorted(str(path) for path in failure_paths)
+    expected_success = sorted(
+        f"{source_identifier}:{path}" for path in success_paths
+    )
+    expected_failure = sorted(
+        f"{source_identifier}:{path}" for path in failure_paths
+    )
+    assert succeeded == expected_success
+    assert failed == expected_failure
 
     extra_success = [tmp_path / "done-a", tmp_path / "done-c"]
     _write_scan_status_files(
         workspace,
         success_paths=extra_success,
         failure_paths=[],
+        source_identifier=source_identifier,
     )
 
     resumed = sorted((workspace / "scan_succeeded.txt").read_text().splitlines())
-    assert resumed == sorted(
-        {str(path) for path in success_paths + extra_success}
+    expected_combined = sorted(
+        {
+            f"{source_identifier}:{path}"
+            for path in success_paths + extra_success
+        }
     )
+    assert resumed == expected_combined

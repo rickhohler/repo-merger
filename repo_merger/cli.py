@@ -138,6 +138,10 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Glob pattern to detect fragment repos when scanning.",
     )
     parser.add_argument(
+        "--scan-source-id",
+        help="Identifier describing the scan source (e.g., drive or DMG name).",
+    )
+    parser.add_argument(
         "--golden-gh-pull",
         action="store_true",
         help="Use gh CLI to clone all user-owned repositories into the workspace golden structure.",
@@ -205,6 +209,7 @@ class ScanRunConfig:
     golden: Path
     identifier: str
     context: ScanContext
+    source_id: str
 
 
 def _run_workspace_flow(args: argparse.Namespace) -> None:
@@ -359,6 +364,7 @@ def _process_single_run(
     if scan_context is not None and not args.dry_run:
         _write_scan_status_files(
             paths.root,
+            source_identifier=scan_context.source_identifier,
             success_paths=success_paths,
             failure_paths=failure_paths,
         )
@@ -566,18 +572,34 @@ def _log_scan_summary(stats: Counter[str], *, dry_run: bool) -> None:
     logging.info("\n".join(lines))
 
 
+def _derive_scan_source_id(args: argparse.Namespace, scan_source: Path) -> str:
+    candidate = args.scan_source_id
+    if candidate:
+        return sanitize_identifier(candidate)
+    fallback = scan_source.name or "scan-source"
+    return sanitize_identifier(fallback)
+
+
 def _write_scan_status_files(
     workspace_root: Path,
     *,
+    source_identifier: str,
     success_paths: Sequence[Path],
     failure_paths: Sequence[Path],
 ) -> None:
-    _update_status_file(workspace_root / "scan_succeeded.txt", success_paths)
-    _update_status_file(workspace_root / "scan_failed.txt", failure_paths)
+    identifier = source_identifier or "scan"
+    success_entries = [_format_status_entry(identifier, path) for path in success_paths]
+    failure_entries = [_format_status_entry(identifier, path) for path in failure_paths]
+    _update_status_file(workspace_root / "scan_succeeded.txt", success_entries)
+    _update_status_file(workspace_root / "scan_failed.txt", failure_entries)
 
 
-def _update_status_file(path: Path, entries: Sequence[Path]) -> None:
-    additions = {str(entry) for entry in entries if entry}
+def _format_status_entry(source_identifier: str, path: Path) -> str:
+    return f"{source_identifier}:{path}"
+
+
+def _update_status_file(path: Path, entries: Sequence[str]) -> None:
+    additions = {entry for entry in entries if entry}
     if not additions:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -616,6 +638,7 @@ def _build_scan_runs(args: argparse.Namespace, workspace_root: Path) -> List[Sca
     fragment_candidates = [c for c in candidates if c.classification == "fragment"]
     golden_candidates = [c for c in candidates if c.classification == "golden"]
     runs: List[ScanRunConfig] = []
+    source_id = _derive_scan_source_id(args, scan_source)
 
     if args.golden:
         identifier = derive_identifier(args.golden.expanduser().resolve(), args.identifier)
@@ -626,8 +649,13 @@ def _build_scan_runs(args: argparse.Namespace, workspace_root: Path) -> List[Sca
             golden_candidate=None,
             fragment_candidates=fragment_candidates,
             unassigned=[],
+            source_identifier=source_id,
         )
-        runs.append(ScanRunConfig(golden=args.golden, identifier=identifier, context=context))
+        runs.append(
+            ScanRunConfig(
+                golden=args.golden, identifier=identifier, context=context, source_id=source_id
+            )
+        )
         return runs
 
     if not golden_candidates:
@@ -646,8 +674,16 @@ def _build_scan_runs(args: argparse.Namespace, workspace_root: Path) -> List[Sca
             golden_candidate=golden_candidate,
             fragment_candidates=fragments,
             unassigned=[c for c in unassigned if c not in fragments],
+            source_identifier=source_id,
         )
-        runs.append(ScanRunConfig(golden=golden_candidate.path, identifier=identifier, context=context))
+        runs.append(
+            ScanRunConfig(
+                golden=golden_candidate.path,
+                identifier=identifier,
+                context=context,
+                source_id=source_id,
+            )
+        )
 
     return runs
 
@@ -659,12 +695,14 @@ def _build_scan_context(
     golden_candidate: ScanCandidate | None,
     fragment_candidates: Sequence[ScanCandidate],
     unassigned: Sequence[ScanCandidate],
+    source_identifier: str,
 ) -> ScanContext:
     root = workspace_root / identifier
     manifest = ScanManifest(root / "scan_manifest.json")
     context = ScanContext(
         manifest=manifest,
         report_path=root / "scan_report.json",
+        source_identifier=source_identifier,
     )
 
     golden_resolved = golden_path.expanduser().resolve()
