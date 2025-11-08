@@ -530,6 +530,11 @@ def _log_scan_summary(stats: Counter[str], *, dry_run: bool) -> None:
             stats.get("golden-replaced", 0),
             "existing goldens overwritten due to --force",
         ),
+        (
+            "Goldens failed",
+            stats.get("golden-failed", 0),
+            "goldens that could not be cloned or copied",
+        ),
     ]
 
     lines = ["", title, "-" * len(title)]

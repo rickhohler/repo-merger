@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import subprocess
 
@@ -89,3 +90,33 @@ def test_mirror_golden_repo_handles_bare(tmp_path: Path) -> None:
     mirror_golden_repo(bare, destination, dry_run=False, replace=True)
 
     assert (destination / ".git").is_dir()
+
+
+def test_mirror_golden_repo_reports_failed_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    bare = tmp_path / "bare.git"
+    subprocess.run(
+        ["git", "init", "--bare", str(bare)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    destination = tmp_path / "workspace" / "demo" / "golden"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    def fake_clone_repo(*_: object, **__: object) -> None:
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["git", "clone"],
+            stderr="fatal: smudge filter lfs failed",
+        )
+
+    monkeypatch.setattr("repo_merger.workspace.clone_repo", fake_clone_repo)
+    caplog.set_level(logging.WARNING)
+
+    status = mirror_golden_repo(bare, destination, dry_run=False, replace=True)
+
+    assert status == "failed"
+    assert any("git clone failed" in record.message for record in caplog.records)

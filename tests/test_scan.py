@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from pathlib import Path
 import subprocess
+
+import pytest
 
 from repo_merger.auto import (
     ScanCandidate,
@@ -10,6 +14,7 @@ from repo_merger.auto import (
     ScanReportEntry,
     scan_for_repos,
 )
+from repo_merger.cli import _log_scan_summary
 
 
 def make_git_repo(path: Path, has_remote: bool = True) -> None:
@@ -104,3 +109,12 @@ def test_scan_manifest_records_ingestion(tmp_path: Path) -> None:
     assert entry is not None
     assert entry["fragment_id"] == "001-fragment-hash"
     assert entry["digest"] == candidate.digest
+
+
+def test_log_scan_summary_reports_failed_goldens(caplog: pytest.LogCaptureFixture) -> None:
+    stats = Counter({"goldens": 1, "golden-failed": 1})
+    caplog.set_level(logging.INFO)
+
+    _log_scan_summary(stats, dry_run=False)
+
+    assert "Goldens failed" in caplog.text
