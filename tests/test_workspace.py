@@ -62,7 +62,12 @@ def test_prepare_workspace_creates_structure(tmp_path: Path) -> None:
 
 def test_prepare_workspace_respects_force_flag(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    paths = prepare_workspace(workspace, "demo", dry_run=False, force=False)
-    with pytest.raises(RepoMergerError):
-        prepare_workspace(workspace, "demo", dry_run=False, force=False)
+    paths_first = prepare_workspace(workspace, "demo", dry_run=False, force=False)
+    assert paths_first.root.exists()
+
+    # Re-running without force should reuse the existing structure
+    paths_second = prepare_workspace(workspace, "demo", dry_run=False, force=False)
+    assert paths_second.golden.exists()
+
+    # With force=True the directories are recreated
     prepare_workspace(workspace, "demo", dry_run=False, force=True)

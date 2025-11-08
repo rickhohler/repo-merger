@@ -45,20 +45,26 @@ def prepare_workspace(
     _ensure_directory(workspace_root, dry_run=dry_run)
 
     target_root = workspace_root / identifier
-    _ensure_clean_directory(target_root, dry_run=dry_run, force=force, describe="workspace root")
+    _ensure_directory_state(target_root, dry_run=dry_run, force=force, describe="workspace root")
 
     golden_dir = target_root / "golden"
     fragments_dir = target_root / "fragments"
 
-    _ensure_clean_directory(golden_dir, dry_run=dry_run, force=force, describe="golden directory")
-    _ensure_clean_directory(
+    _ensure_directory_state(golden_dir, dry_run=dry_run, force=force, describe="golden directory")
+    _ensure_directory_state(
         fragments_dir, dry_run=dry_run, force=force, describe="fragments directory"
     )
 
     return WorkspacePaths(root=target_root, golden=golden_dir, fragments=fragments_dir)
 
 
-def mirror_golden_repo(source: Path, destination: Path, *, dry_run: bool = False) -> None:
+def mirror_golden_repo(
+    source: Path,
+    destination: Path,
+    *,
+    dry_run: bool = False,
+    replace: bool = False,
+) -> None:
     source = source.expanduser()
     if not source.exists():
         raise RepoMergerError(f"Golden repository path does not exist: {source}")
@@ -73,11 +79,16 @@ def mirror_golden_repo(source: Path, destination: Path, *, dry_run: bool = False
                 f"Golden destination exists but is not a directory: {destination}"
             )
         if any(destination.iterdir()):
-            raise RepoMergerError(
-                f"Golden destination already contains files: {destination}"
-            )
+            if replace:
+                shutil.rmtree(destination)
+                destination.mkdir(parents=True, exist_ok=True)
+            else:
+                logging.info(
+                    "Golden destination already populated at %s; skipping mirror.", destination
+                )
+                return
     else:
-        destination.mkdir(parents=True, exist_ok=False)
+        destination.mkdir(parents=True, exist_ok=True)
 
     logging.info("Copying golden repository into %s", destination)
     shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
@@ -146,20 +157,20 @@ def _ensure_directory(path: Path, *, dry_run: bool) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def _ensure_clean_directory(
+def _ensure_directory_state(
     path: Path, *, dry_run: bool, force: bool, describe: str
 ) -> None:
     if path.exists():
+        if not path.is_dir():
+            raise RepoMergerError(f"Existing {describe} is not a directory: {path}")
         if not force:
-            raise RepoMergerError(
-                f"{describe.capitalize()} already exists at {path}. "
-                "Use --force to replace it."
-            )
+            logging.debug("Reusing existing %s at %s", describe, path)
+            return
         if dry_run:
             logging.info("Dry run: would remove existing %s at %s", describe, path)
-        else:
-            shutil.rmtree(path)
+            return
+        shutil.rmtree(path)
     if dry_run:
         logging.info("Dry run: would create %s at %s", describe, path)
     else:
-        path.mkdir(parents=True, exist_ok=False)
+        path.mkdir(parents=True, exist_ok=True)

@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
 
-from .auto import ScanContext, ScanManifest, ScanReportEntry, scan_for_repos
+from .auto import (
+    ScanCandidate,
+    ScanContext,
+    ScanManifest,
+    ScanReportEntry,
+    scan_for_repos,
+)
 from .fragments import ingest_fragments, write_fragment_manifest
 from .handler_registry import HandlerRegistry
 from .inspection import FragmentAnalysis, inspect_fragments
@@ -142,21 +150,44 @@ def run(args: argparse.Namespace) -> int:
     raise RepoMergerError(f"Unknown command: {args.command}")
 
 
+@dataclass
+class ScanRunConfig:
+    golden: Path
+    identifier: str
+    context: ScanContext
+
+
 def _run_workspace_flow(args: argparse.Namespace) -> None:
     scenario_registry = UnhandledScenarioRegistry(Path(__file__).resolve().parents[1])
     workspace_root = args.workspace.expanduser().resolve()
 
-    if not args.golden:
-        raise RepoMergerError("--golden is required for workspace runs.")
+    if args.scan:
+        scan_runs = _build_scan_runs(args, workspace_root)
+        if not scan_runs:
+            raise RepoMergerError("Scan did not identify any golden repositories.")
+        for run in scan_runs:
+            _process_single_run(
+                args=args,
+                workspace_root=workspace_root,
+                golden_path=run.golden,
+                fragments=args.fragments or [],
+                explicit_identifier=run.identifier,
+                scenario_registry=scenario_registry,
+                scan_context=run.context,
+            )
+        return
 
-    fragments = args.fragments or []
+    if not args.golden:
+        raise RepoMergerError("--golden is required (or use --scan to discover repos).")
+
     _process_single_run(
         args=args,
         workspace_root=workspace_root,
         golden_path=args.golden,
-        fragments=fragments,
-        identifier_override=args.identifier,
+        fragments=args.fragments or [],
+        explicit_identifier=args.identifier,
         scenario_registry=scenario_registry,
+        scan_context=None,
     )
 
 
@@ -165,14 +196,15 @@ def _process_single_run(
     workspace_root: Path,
     golden_path: Path,
     fragments: Sequence[Path],
-    identifier_override: str | None,
+    explicit_identifier: str | None,
     scenario_registry: UnhandledScenarioRegistry,
+    scan_context: ScanContext | None,
 ) -> None:
     golden_path = golden_path.expanduser().resolve()
     logging.info("Golden repo: %s", golden_path)
     logging.info("Workspace root: %s", workspace_root)
 
-    identifier = derive_identifier(golden_path, identifier_override)
+    identifier = explicit_identifier or derive_identifier(golden_path, None)
     logging.info("Workspace identifier: %s", identifier)
 
     paths = prepare_workspace(
@@ -183,17 +215,14 @@ def _process_single_run(
     )
 
     fragment_paths = _normalize_fragment_paths(fragments)
-    scan_context: ScanContext | None = None
-
-    if args.scan:
-        scan_context = _prepare_scan_context(args, paths, golden_path)
+    if scan_context is not None:
         fragment_paths.extend(scan_context.fragments_to_ingest())
         fragment_paths = _normalize_fragment_paths(fragment_paths)
 
     if args.dry_run:
         logging.info("Dry run enabled; skipping golden mirroring.")
     else:
-        mirror_golden_repo(golden_path, paths.golden)
+        mirror_golden_repo(golden_path, paths.golden, dry_run=False, replace=args.force)
 
     records = []
     if fragment_paths:
@@ -270,11 +299,7 @@ def _normalize_fragment_paths(paths: Sequence[Path]) -> List[Path]:
     return normalized
 
 
-def _prepare_scan_context(
-    args: argparse.Namespace,
-    paths: WorkspacePaths,
-    golden_path: Path,
-) -> ScanContext:
+def _build_scan_runs(args: argparse.Namespace, workspace_root: Path) -> List[ScanRunConfig]:
     if not args.scan_source:
         raise RepoMergerError("--scan-source is required when --scan is enabled")
     scan_source = args.scan_source.expanduser().resolve()
@@ -292,56 +317,153 @@ def _prepare_scan_context(
         scan_source,
         golden_pattern=args.scan_golden_pattern,
         fragment_pattern=args.scan_fragment_pattern,
-        exclude=[paths.root],
+        exclude=[workspace_root],
     )
-    manifest = ScanManifest(paths.root / "scan_manifest.json")
+
+    fragment_candidates = [c for c in candidates if c.classification == "fragment"]
+    golden_candidates = [c for c in candidates if c.classification == "golden"]
+    runs: List[ScanRunConfig] = []
+
+    if args.golden:
+        identifier = derive_identifier(args.golden.expanduser().resolve(), args.identifier)
+        context = _build_scan_context(
+            workspace_root=workspace_root,
+            identifier=identifier,
+            golden_path=args.golden,
+            golden_candidate=None,
+            fragment_candidates=fragment_candidates,
+            unassigned=[],
+        )
+        runs.append(ScanRunConfig(golden=args.golden, identifier=identifier, context=context))
+        return runs
+
+    if not golden_candidates:
+        raise RepoMergerError(
+            "Scan found no golden repositories. Consider specifying --golden or adjust patterns."
+        )
+
+    assignments, unassigned = _assign_fragments_to_goldens(golden_candidates, fragment_candidates)
+    for golden_candidate in golden_candidates:
+        fragments = assignments.get(golden_candidate.path, [])
+        identifier = derive_identifier(golden_candidate.path, None)
+        context = _build_scan_context(
+            workspace_root=workspace_root,
+            identifier=identifier,
+            golden_path=golden_candidate.path,
+            golden_candidate=golden_candidate,
+            fragment_candidates=fragments,
+            unassigned=[c for c in unassigned if c not in fragments],
+        )
+        runs.append(ScanRunConfig(golden=golden_candidate.path, identifier=identifier, context=context))
+
+    return runs
+
+
+def _build_scan_context(
+    workspace_root: Path,
+    identifier: str,
+    golden_path: Path,
+    golden_candidate: ScanCandidate | None,
+    fragment_candidates: Sequence[ScanCandidate],
+    unassigned: Sequence[ScanCandidate],
+) -> ScanContext:
+    root = workspace_root / identifier
+    manifest = ScanManifest(root / "scan_manifest.json")
     context = ScanContext(
         manifest=manifest,
-        report_path=paths.root / "scan_report.json",
+        report_path=root / "scan_report.json",
     )
 
-    if not candidates:
-        logging.info("Scan found no repositories inside %s", scan_source)
-        return context
-
     golden_resolved = golden_path.expanduser().resolve()
-    for candidate in candidates:
-        action = "ignored"
-        reason = candidate.reason
+    if golden_candidate:
+        action = "candidate"
+        reason = golden_candidate.reason
+        if golden_candidate.path.expanduser().resolve() == golden_resolved:
+            action = "workspace-golden"
+            reason = "Matches discovered golden candidate."
+        context.add_report_entry(
+            ScanReportEntry(
+                source=str(golden_candidate.path),
+                classification="golden",
+                confidence=golden_candidate.confidence,
+                action=action,
+                reason=reason,
+            )
+        )
+    else:
+        context.add_report_entry(
+            ScanReportEntry(
+                source=str(golden_path),
+                classification="golden",
+                confidence=1.0,
+                action="workspace-golden",
+                reason="User-specified golden repository.",
+            )
+        )
 
-        if candidate.classification == "fragment":
-            entry = manifest.lookup(candidate.path)
-            if entry and entry.get("digest") == candidate.digest:
-                action = "existing"
-                reason = "Fragment already ingested into workspace."
-            else:
-                context.add_pending_fragment(candidate)
-                action = "ingest"
-        elif candidate.classification == "golden":
-            if candidate.path.expanduser().resolve() == golden_resolved:
-                action = "workspace-golden"
-                reason = "Matches provided golden repository."
-            else:
-                action = "report"
-                reason = "Golden candidate detected; copy manually if desired."
+    for candidate in fragment_candidates:
+        entry = manifest.lookup(candidate.path)
+        if entry and entry.get("digest") == candidate.digest:
+            action = "existing"
+            reason = "Fragment already ingested into workspace."
         else:
-            action = "unknown"
-
+            context.add_pending_fragment(candidate)
+            action = "ingest"
+            reason = candidate.reason
         context.add_report_entry(
             ScanReportEntry(
                 source=str(candidate.path),
-                classification=candidate.classification,
+                classification="fragment",
                 confidence=candidate.confidence,
                 action=action,
                 reason=reason,
             )
         )
 
-    logging.info(
-        "Scan identified %d fragment candidate(s) awaiting ingestion.",
-        len(context.pending_fragments),
-    )
+    for candidate in unassigned:
+        context.add_report_entry(
+            ScanReportEntry(
+                source=str(candidate.path),
+                classification="fragment",
+                confidence=candidate.confidence,
+                action="unassigned",
+                reason="No matching golden candidate identified.",
+            )
+        )
+
     return context
+
+
+def _assign_fragments_to_goldens(
+    golden_candidates: Sequence[ScanCandidate],
+    fragment_candidates: Sequence[ScanCandidate],
+) -> tuple[dict[Path, List[ScanCandidate]], List[ScanCandidate]]:
+    mapping: dict[Path, List[ScanCandidate]] = {candidate.path: [] for candidate in golden_candidates}
+    unassigned: List[ScanCandidate] = []
+    if not golden_candidates:
+        return mapping, list(fragment_candidates)
+
+    for fragment in fragment_candidates:
+        best_candidate: ScanCandidate | None = None
+        best_score = 0
+        for golden in golden_candidates:
+            score = _path_similarity_score(golden.path, fragment.path)
+            if score > best_score:
+                best_score = score
+                best_candidate = golden
+        if best_candidate and best_score > 0:
+            mapping.setdefault(best_candidate.path, []).append(fragment)
+        else:
+            unassigned.append(fragment)
+    return mapping, unassigned
+
+
+def _path_similarity_score(a: Path, b: Path) -> int:
+    try:
+        common = os.path.commonpath([a.expanduser().resolve(), b.expanduser().resolve()])
+    except ValueError:
+        return 0
+    return len(Path(common).parts)
 
 
 def _emit_report(
