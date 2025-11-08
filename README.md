@@ -1,0 +1,97 @@
+# Repo Merger
+
+![CI](https://github.com/rickhohler/repo-merger/actions/workflows/ci.yml/badge.svg)
+
+Tooling that consolidates multiple repository directories into a single workspace
+containing a **golden** copy (authoritative source) and **fragment** copies
+(partials, stale clones, recovered files, etc.).
+
+## Usage (MVP)
+
+```bash
+python -m repo_merger run \
+  --workspace /tmp/merges \
+  --golden /path/to/golden-repo \
+  --fragment /path/to/fragment-a \
+  --fragment /path/to/fragment-b \
+  --mode analyze \
+  --recover-missing \
+  --dry-run
+```
+
+Key flags:
+
+- `--workspace`: directory that will hold the merged workspace(s).
+- `--golden`: local path to the complete repository you trust the most.
+- `--fragment`: optional partial copies to mirror into the workspace (repeatable).
+- `--identifier`: override the derived workspace identifier (defaults to origin slug).
+- `--mode`: `analyze` (default) or `merge` for applying fragment changes via git worktrees.
+- `--force`: allow overwriting an existing workspace directory.
+- `--recover-missing`: recover fragments without `.git/` metadata into synthetic repos.
+- `--resume-from`: resume `--mode merge` at a particular fragment ID.
+- `--dry-run`: log the planned filesystem actions without writing.
+- `--verbose`: enable debug logging for troubleshooting.
+
+Running without `--dry-run` mirrors the golden repository into
+`<workspace>/<identifier>/golden/` and prepares an empty
+`<workspace>/<identifier>/fragments/` directory for future steps.
+
+Supplying one or more `--fragment` paths copies those directories or files into
+`<workspace>/<identifier>/fragments/<fragment-id>/` (IDs are derived from the
+original path plus a digest). Metadata for the latest ingestion run is written
+to `<workspace>/<identifier>/fragments_manifest.json`. With `--recover-missing`,
+fragments that lack `.git/` metadata are mirrored into
+`<workspace>/<identifier>/recovered/<fragment-id>/` as synthetic git repos so the
+merge workflow can treat them consistently.
+
+Running with `--mode merge` creates git worktrees under
+`<workspace>/<identifier>/worktrees/<fragment-id>/`, overlays the fragment
+contents, and captures results in `merge_report.json`.
+
+Analyze mode always produces `<workspace>/<identifier>/analysis.json` with
+fragment statuses (`in-sync`, `diverged`, `non-git`, etc.). Non-git fragments
+also write manifests to `manifests/<fragment-id>.json` containing file hashes to
+aid manual reconciliation.
+
+A consolidated Markdown summary is written to
+`<workspace>/<identifier>/report.md` after each analyze or merge run, and the CLI
+prints a concise text summary for quick review.
+
+## Handler registry & unhandled scenarios
+
+If the tooling encounters a situation it cannot process (e.g., a fragment
+expected to be a git repo but `.git/` is missing), it automatically logs the
+scenario, generates a handler stub under `repo_merger/handlers/`, and updates
+`HANDLERS.md` plus `tests/handlers/`. You can also manage handlers manually:
+
+```bash
+python -m repo_merger handlers add missing-remote --description "Handle repos without origin URL"
+python -m repo_merger handlers list
+```
+
+When a handler stub is added, edit the generated file and matching test to
+implement the recovery logic, update `HANDLERS.md` with status notes, and rerun
+`repo_merger run ...` to confirm the scenario is resolved. See `RUNBOOK.md` for a
+full workflow, including how to interpret `analysis.json`, `report.md`, and
+merge outputs.
+
+### Handler registry CLI
+
+Unhandled scenarios can register handler stubs via:
+
+```bash
+python -m repo_merger handlers add missing-remote --description "Handle repos without origin URL"
+python -m repo_merger handlers list
+```
+
+This scaffolds `repo_merger/handlers/handle_missing_remote.py`, a matching test
+stub under `tests/handlers/`, updates `HANDLERS.md`, and persists metadata in
+`handlers_registry.json`.
+
+Install dependencies (standard library only at the moment) and run tests with:
+
+```bash
+python -m pytest
+```
+
+> CI: All pushes/PRs run `python -m pytest` via GitHub Actions (`.github/workflows/ci.yml`) on Python 3.12.
