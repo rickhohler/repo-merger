@@ -149,7 +149,8 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--golden-gh-pull-limit",
         type=int,
-        help="Limit the number of repositories pulled via --golden-gh-pull (omit for all).",
+        default=2000,
+        help="Limit the number of repositories pulled via --golden-gh-pull (default 2000).",
     )
     parser.add_argument(
         "--golden-gh-pull-protocol",

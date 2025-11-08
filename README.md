@@ -199,5 +199,5 @@ python -m repo_merger run \
   manually copying directories.
 
 > Requires `gh auth login` first. Use `--golden-gh-pull-pattern` (glob) and
-> `--golden-gh-pull-limit` (default 20) to control which repositories are cloned.
+> `--golden-gh-pull-limit` (default 2000) to control which repositories are cloned.
 > to restrict which repositories are cloned.
