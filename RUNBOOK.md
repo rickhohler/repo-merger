@@ -133,7 +133,7 @@ Operator checklist:
 
 ## Appendix: Golden pull
 
-Run `python -m repo_merger run --workspace <root> --golden-pull` (after
+Run `python -m repo_merger run --workspace <root> --golden-gh-pull` (after
 `gh auth login`) to clone every repository you own into the workspace golden
 structure. Existing goldens are compared to the freshly cloned copy; only newer
 repos replace the workspace. Combine with `--scan` afterwards to ingest

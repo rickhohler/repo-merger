@@ -137,30 +137,31 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Glob pattern to detect fragment repos when scanning.",
     )
     parser.add_argument(
-        "--golden-pull",
+        "--golden-gh-pull",
         action="store_true",
         help="Use gh CLI to clone all user-owned repositories into the workspace golden structure.",
     )
     parser.add_argument(
-        "--golden-pull-pattern",
+        "--golden-gh-pull-pattern",
         default="*",
-        help="Glob pattern to filter repositories when using --golden-pull (matches name or owner/name).",
+        help="Glob pattern to filter repositories when using --golden-gh-pull (matches name or owner/name).",
     )
     parser.add_argument(
-        "--golden-pull-limit",
+        "--golden-gh-pull-limit",
         type=int,
-        help="Limit the number of repositories pulled via --golden-pull.",
+        default=20,
+        help="Limit the number of repositories pulled via --golden-gh-pull (default 20).",
     )
     parser.add_argument(
-        "--golden-pull-protocol",
+        "--golden-gh-pull-protocol",
         choices=["ssh", "https"],
         default="ssh",
-        help="Protocol to use when cloning repositories via --golden-pull.",
+        help="Protocol to use when cloning repositories via --golden-gh-pull.",
     )
     parser.add_argument(
-        "--golden-pull-include-private",
+        "--golden-gh-pull-include-private",
         action="store_true",
-        help="Include private repositories when using --golden-pull (requires gh auth).",
+        help="Include private repositories when using --golden-gh-pull (requires gh auth).",
     )
 
 
@@ -205,8 +206,8 @@ def _run_workspace_flow(args: argparse.Namespace) -> None:
     workspace_root = args.workspace.expanduser().resolve()
     performed_pull = False
 
-    if args.golden_pull:
-        _run_golden_pull(args, workspace_root)
+    if args.golden_gh_pull:
+        _run_golden_gh_pull(args, workspace_root)
         performed_pull = True
         if not args.scan and not args.golden:
             logging.info("Golden pull completed; no additional actions requested.")
@@ -234,7 +235,7 @@ def _run_workspace_flow(args: argparse.Namespace) -> None:
                 "Golden pull finished; provide --golden or --scan to continue processing."
             )
             return
-        raise RepoMergerError("--golden is required (or use --scan/--golden-pull to discover repos).")
+        raise RepoMergerError("--golden is required (or use --scan/--golden-gh-pull to discover repos).")
 
     _process_single_run(
         args=args,
@@ -357,17 +358,17 @@ def _normalize_fragment_paths(paths: Sequence[Path]) -> List[Path]:
     return normalized
 
 
-def _run_golden_pull(args: argparse.Namespace, workspace_root: Path) -> None:
-    visibility = "all" if args.golden_pull_include_private else None
+def _run_golden_gh_pull(args: argparse.Namespace, workspace_root: Path) -> None:
+    visibility = "all" if args.golden_gh_pull_include_private else None
     try:
-        repos = list_user_repos(limit=args.golden_pull_limit, visibility=visibility)
+        repos = list_user_repos(limit=args.golden_gh_pull_limit, visibility=visibility)
     except RuntimeError as exc:  # pragma: no cover - gh failure
         raise RepoMergerError(str(exc)) from exc
 
-    pattern = args.golden_pull_pattern or "*"
+    pattern = args.golden_gh_pull_pattern or "*"
     matched = [repo for repo in repos if _match_repo(repo, pattern)]
     if not matched:
-        logging.info("golden-pull: no repositories matched pattern '%s'", pattern)
+        logging.info("golden-gh-pull: no repositories matched pattern '%s'", pattern)
         return
 
     if args.dry_run:
@@ -380,7 +381,7 @@ def _run_golden_pull(args: argparse.Namespace, workspace_root: Path) -> None:
             )
         return
 
-    protocol_field = "sshUrl" if args.golden_pull_protocol == "ssh" else "cloneUrl"
+    protocol_field = "sshUrl" if args.golden_gh_pull_protocol == "ssh" else "url"
 
     for repo in matched:
         repo_url = repo.get(protocol_field)
@@ -389,7 +390,7 @@ def _run_golden_pull(args: argparse.Namespace, workspace_root: Path) -> None:
             continue
         identifier = sanitize_identifier(repo["nameWithOwner"].replace("/", "-"))
         paths = ensure_workspace_dirs(workspace_root, identifier)
-        with tempfile.TemporaryDirectory(prefix="golden-pull-") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="golden-gh-pull-") as tmpdir:
             clone_target = Path(tmpdir) / "repo"
             logging.info("Cloning %s", repo["nameWithOwner"])
             clone_repo(repo_url, clone_target)

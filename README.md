@@ -31,7 +31,7 @@ Key flags:
 - `--recover-missing`: recover fragments without `.git/` metadata into synthetic repos.
 - `--resume-from`: resume `--mode merge` at a particular fragment ID.
 - `--scan`, `--scan-source`, `--scan-golden-pattern`, `--scan-fragment-pattern`: auto-discover golden and fragment repos in arbitrary directories.
-- `--golden-pull`: clone every repo owned by the authenticated `gh` user into the workspace golden structure (see “Golden pull” below).
+- `--golden-gh-pull`: clone every repo owned by the authenticated `gh` user into the workspace golden structure (see “Golden gh pull” below).
 - `--dry-run`: log the planned filesystem actions without writing.
 - `--verbose`: enable debug logging for troubleshooting.
 
@@ -176,7 +176,7 @@ See `CHANGELOG.md` for release notes. Tag releases as `vMAJOR.MINOR.PATCH`
 (e.g., `v0.1.0`) once changes are merged to `main`.
 
 > CI: All pushes/PRs run `python -m pytest` via GitHub Actions (`.github/workflows/ci.yml`) on Python 3.12.
-### Golden pull (fetching repos from GitHub automatically)
+### Golden gh pull (fetching repos from GitHub automatically)
 
 If you have the GitHub CLI (`gh`) authenticated, you can clone every repository
 you own directly into the workspace via:
@@ -184,11 +184,11 @@ you own directly into the workspace via:
 ```bash
 python -m repo_merger run \
   --workspace $HOME/REPO_WORKSPACE \
-  --golden-pull \
+  --golden-gh-pull \
   --recover-missing
 ```
 
-- `--golden-pull` enumerates the current user’s repositories via `gh repo list` and
+- `--golden-gh-pull` enumerates the current user’s repositories via `gh repo list` and
   clones each one (all branches/history) under
   `<workspace>/<identifier>/golden/`. Identifiers are derived from the remote
   URL or repo name.
@@ -198,5 +198,6 @@ python -m repo_merger run \
 - Combine with `--scan` to ingest fragments after the golden pull without
   manually copying directories.
 
-> Requires `gh auth login` first. Use `--golden-pull-pattern`/`--golden-pull-limit`
+> Requires `gh auth login` first. Use `--golden-gh-pull-pattern` (glob) and
+> `--golden-gh-pull-limit` (default 20) to control which repositories are cloned.
 > to restrict which repositories are cloned.
