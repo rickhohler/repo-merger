@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import logging
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
@@ -15,13 +18,27 @@ from .auto import (
     scan_for_repos,
 )
 from .fragments import ingest_fragments, write_fragment_manifest
+from .gitutils import (
+    clone_repo,
+    git_has_commit,
+    git_is_ancestor,
+    git_rev_parse,
+    list_user_repos,
+)
 from .handler_registry import HandlerRegistry
 from .inspection import FragmentAnalysis, inspect_fragments
 from .merge import MergeResult, merge_fragments
 from .recovery import recover_fragments
 from .reporting import summarize_cli, write_markdown_report
 from .unhandled import UnhandledScenarioRegistry
-from .workspace import RepoMergerError, derive_identifier, mirror_golden_repo, prepare_workspace
+from .workspace import (
+    RepoMergerError,
+    derive_identifier,
+    ensure_workspace_dirs,
+    mirror_golden_repo,
+    prepare_workspace,
+    sanitize_identifier,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -119,6 +136,32 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default="fragment*",
         help="Glob pattern to detect fragment repos when scanning.",
     )
+    parser.add_argument(
+        "--golden-pull",
+        action="store_true",
+        help="Use gh CLI to clone all user-owned repositories into the workspace golden structure.",
+    )
+    parser.add_argument(
+        "--golden-pull-pattern",
+        default="*",
+        help="Glob pattern to filter repositories when using --golden-pull (matches name or owner/name).",
+    )
+    parser.add_argument(
+        "--golden-pull-limit",
+        type=int,
+        help="Limit the number of repositories pulled via --golden-pull.",
+    )
+    parser.add_argument(
+        "--golden-pull-protocol",
+        choices=["ssh", "https"],
+        default="ssh",
+        help="Protocol to use when cloning repositories via --golden-pull.",
+    )
+    parser.add_argument(
+        "--golden-pull-include-private",
+        action="store_true",
+        help="Include private repositories when using --golden-pull (requires gh auth).",
+    )
 
 
 def _add_handler_arguments(parser: argparse.ArgumentParser) -> None:
@@ -160,6 +203,14 @@ class ScanRunConfig:
 def _run_workspace_flow(args: argparse.Namespace) -> None:
     scenario_registry = UnhandledScenarioRegistry(Path(__file__).resolve().parents[1])
     workspace_root = args.workspace.expanduser().resolve()
+    performed_pull = False
+
+    if args.golden_pull:
+        _run_golden_pull(args, workspace_root)
+        performed_pull = True
+        if not args.scan and not args.golden:
+            logging.info("Golden pull completed; no additional actions requested.")
+            return
 
     if args.scan:
         scan_runs = _build_scan_runs(args, workspace_root)
@@ -178,7 +229,12 @@ def _run_workspace_flow(args: argparse.Namespace) -> None:
         return
 
     if not args.golden:
-        raise RepoMergerError("--golden is required (or use --scan to discover repos).")
+        if performed_pull:
+            logging.info(
+                "Golden pull finished; provide --golden or --scan to continue processing."
+            )
+            return
+        raise RepoMergerError("--golden is required (or use --scan/--golden-pull to discover repos).")
 
     _process_single_run(
         args=args,
@@ -299,6 +355,99 @@ def _normalize_fragment_paths(paths: Sequence[Path]) -> List[Path]:
         seen.add(key)
         normalized.append(resolved)
     return normalized
+
+
+def _run_golden_pull(args: argparse.Namespace, workspace_root: Path) -> None:
+    visibility = "all" if args.golden_pull_include_private else None
+    try:
+        repos = list_user_repos(limit=args.golden_pull_limit, visibility=visibility)
+    except RuntimeError as exc:  # pragma: no cover - gh failure
+        raise RepoMergerError(str(exc)) from exc
+
+    pattern = args.golden_pull_pattern or "*"
+    matched = [repo for repo in repos if _match_repo(repo, pattern)]
+    if not matched:
+        logging.info("golden-pull: no repositories matched pattern '%s'", pattern)
+        return
+
+    if args.dry_run:
+        for repo in matched:
+            identifier = sanitize_identifier(repo["nameWithOwner"].replace("/", "-"))
+            logging.info(
+                "Dry run: would clone %s into %s",
+                repo["nameWithOwner"],
+                workspace_root / identifier / "golden",
+            )
+        return
+
+    protocol_field = "sshUrl" if args.golden_pull_protocol == "ssh" else "cloneUrl"
+
+    for repo in matched:
+        repo_url = repo.get(protocol_field)
+        if not repo_url:
+            logging.warning("Skipping %s; missing %s", repo["nameWithOwner"], protocol_field)
+            continue
+        identifier = sanitize_identifier(repo["nameWithOwner"].replace("/", "-"))
+        paths = ensure_workspace_dirs(workspace_root, identifier)
+        with tempfile.TemporaryDirectory(prefix="golden-pull-") as tmpdir:
+            clone_target = Path(tmpdir) / "repo"
+            logging.info("Cloning %s", repo["nameWithOwner"])
+            clone_repo(repo_url, clone_target)
+            status, reason = _evaluate_golden_candidate(paths.golden, clone_target)
+            logging.info(
+                "Golden pull %s: %s (%s)", repo["nameWithOwner"], status, reason
+            )
+            if status in {"install", "replace"}:
+                _install_golden(paths.golden, clone_target)
+            elif status == "identical":
+                continue
+            elif status == "keep":
+                logging.info("Keeping existing golden for %s", repo["nameWithOwner"])
+            elif status == "diverged":
+                logging.warning(
+                    "Golden at %s diverged from %s; skipping replacement.",
+                    paths.golden,
+                    repo["nameWithOwner"],
+                )
+
+
+def _match_repo(repo: dict, pattern: str) -> bool:
+    name = repo.get("name", "")
+    full = repo.get("nameWithOwner", name)
+    return fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(full, pattern)
+
+
+def _install_golden(destination: Path, candidate: Path) -> None:
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(candidate), str(destination))
+
+
+def _evaluate_golden_candidate(existing: Path, candidate: Path) -> tuple[str, str]:
+    if not existing.exists() or not any(existing.iterdir()):
+        return "install", "No existing golden"
+    try:
+        existing_head = git_rev_parse(existing)
+        candidate_head = git_rev_parse(candidate)
+    except RuntimeError as exc:
+        logging.warning("Failed to read git metadata: %s", exc)
+        return "diverged", "Unable to read git metadata"
+
+    if existing_head == candidate_head:
+        return "identical", "Same HEAD commit"
+
+    if git_has_commit(candidate, existing_head) and git_is_ancestor(
+        candidate, existing_head, candidate_head
+    ):
+        return "replace", "Candidate includes newer commits"
+
+    if git_has_commit(existing, candidate_head) and git_is_ancestor(
+        existing, candidate_head, existing_head
+    ):
+        return "keep", "Workspace golden ahead of remote"
+
+    return "diverged", "Histories diverged"
 
 
 def _build_scan_runs(args: argparse.Namespace, workspace_root: Path) -> List[ScanRunConfig]:

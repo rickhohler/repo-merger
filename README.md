@@ -192,7 +192,11 @@ python -m repo_merger run \
   clones each one (all branches/history) under
   `<workspace>/<identifier>/golden/`. Identifiers are derived from the remote
   URL or repo name.
-- Existing goldens are reused unless you pass `--force` or
-  `--replace-golden=<name>`.
+- If a workspace already has that golden, repo-merger compares commit history:
+  identical repos are skipped, newer GitHub copies replace the workspace, and
+  older/diverged copies are reported but left untouched.
 - Combine with `--scan` to ingest fragments after the golden pull without
   manually copying directories.
+
+> Requires `gh auth login` first. Use `--golden-pull-pattern`/`--golden-pull-limit`
+> to restrict which repositories are cloned.

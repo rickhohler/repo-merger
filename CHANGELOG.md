@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file and follow
   fragments into workspaces.
 - Bare repository detection during scanning and mirroring (bare goldens are
   cloned into working trees automatically).
+- `--golden-pull` option that clones all `gh` user repositories into the
+  workspace, comparing them against existing goldens and replacing only when the
+  GitHub copy is newer.
 
 ### Changed
 - Workspace preparation reuses existing directories unless `--force` is passed,

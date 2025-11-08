@@ -36,6 +36,20 @@ def derive_identifier(golden_path: Path, explicit: Optional[str] = None) -> str:
     return _sanitize(fallback)
 
 
+def sanitize_identifier(value: str) -> str:
+    return _sanitize(value)
+
+
+def ensure_workspace_dirs(workspace_root: Path, identifier: str) -> WorkspacePaths:
+    workspace_root = workspace_root.expanduser()
+    root = workspace_root / identifier
+    golden_dir = root / "golden"
+    fragments_dir = root / "fragments"
+    for path in [workspace_root, root, golden_dir, fragments_dir]:
+        path.mkdir(parents=True, exist_ok=True)
+    return WorkspacePaths(root=root, golden=golden_dir, fragments=fragments_dir)
+
+
 def prepare_workspace(
     workspace_root: Path,
     identifier: str,
