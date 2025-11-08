@@ -127,7 +127,10 @@ class ScanContext:
         self._write_report()
 
     def _write_report(self) -> None:
-        payload = {"entries": [entry.__dict__ for entry in self.report_entries]}
+        payload = {
+            "source_identifier": self.source_identifier,
+            "entries": [entry.__dict__ for entry in self.report_entries],
+        }
         self.report_path.write_text(json.dumps(payload, indent=2))
 
 
