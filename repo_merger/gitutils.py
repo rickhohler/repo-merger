@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import List, Sequence
 
 
 def is_bare_repo(path: Path) -> bool:
@@ -29,11 +30,30 @@ def has_remote_from_config(config_text: str) -> bool:
     return "remote \"" in lowered or "url =" in lowered
 
 
-def clone_repo(source: Path, destination: Path) -> None:
+def clone_repo(source: Path, destination: Path, *, bare: bool = False, mirror: bool = False) -> None:
+    args = ["git", "clone"]
+    if bare:
+        args.append("--bare")
+    if mirror:
+        args.append("--mirror")
+    args.extend([str(source), str(destination)])
     subprocess.run(
-        ["git", "clone", str(source), str(destination)],
+        args,
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+def run_gh_command(args: Sequence[str]) -> str:
+    result = subprocess.run(
+        ["gh", *args],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"gh {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout
