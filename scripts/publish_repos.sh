@@ -78,6 +78,14 @@ declare -i pushed=0
 declare -i pushed_dry=0
 declare -i processed=0
 
+squeeze_name() {
+  local slug=$1
+  slug="${slug//[^A-Za-z0-9._-]/-}"
+  slug="${slug##-}"
+  slug="${slug%%-}"
+  echo "${slug:-repo}"
+}
+
 process_repo() {
   local repo_dir=$1
   local repo_slug=$2
@@ -139,11 +147,37 @@ push_repo() {
   fi
 }
 
+
+owner_repo_from_url() {
+  local url=$1
+  url="${url#git@github.com:}"
+  url="${url#https://github.com/}"
+  url="${url%.git}"
+  owner="${url%%/*}"
+  repo="${url##*/}"
+  echo "$owner" "$repo"
+}
+
 for project_dir in "$workspace_root"/*; do
   [[ -d $project_dir ]] || continue
   golden_dir="$project_dir/golden"
   [[ -d $golden_dir ]] || continue
-  repo_slug=$(basename "$project_dir")
+  origin_url=$(git -C "$golden_dir" remote get-url origin 2>/dev/null || true)
+  if [[ -n $origin_url ]]; then
+    read -r origin_owner origin_repo <<< "$(owner_repo_from_url "$origin_url")"
+    if [[ -n $origin_owner && -n $origin_repo ]]; then
+      if [[ $origin_owner == $gh_user ]]; then
+        base_name="$origin_repo"
+      else
+        base_name="${origin_owner}-${origin_repo}"
+      fi
+    else
+      base_name=$(basename "$project_dir")
+    fi
+  else
+    base_name=$(basename "$project_dir")
+  fi
+  repo_slug=$(squeeze_name "$base_name")
 
   if ! git -C "$golden_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "[$repo_slug] golden directory is not a git repository; skipping"

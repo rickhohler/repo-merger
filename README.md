@@ -165,8 +165,12 @@ with lower confidence and require operator approval (e.g., via
 `scripts/publish_repos.sh` walks every `<workspace>/<project>/golden` directory,
 ensures a `gh_default` SSH remote exists (creating the private GitHub repo via
 `gh` when needed), and mirrors the complete history/refs via `git push --mirror`.
-Pass `--dry-run` to preview the work, `--remote-only` to skip the push, and
-`--limit <n>` to stop after mirroring the first `n` golden repos.
+When detecting the GitHub target name, the script reuses any origin URL: it keeps
+the owner portion only if it differs from the authenticated `gh` user, so you
+don’t get duplicated owner prefixes for your own repos but still keep the upstream
+owner for other people’s projects. Pass `--dry-run` to preview the work,
+`--remote-only` to skip the push, and `--limit <n>` to stop after mirroring the
+first `n` golden repos.
 
 When your workspace still contains invalid golden or fragment trees, use
 `scripts/move_invalid_repos.py ~/BUCKET/REPO_WORKSPACE` to relocate those

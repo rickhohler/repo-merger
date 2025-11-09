@@ -5,16 +5,13 @@ All notable changes to this project will be documented in this file and follow
 
 ## [Unreleased]
 
-### Added
-- Packaged entry point (`pyproject.toml`, `python -m repo_merger`).
-- Recursive `--scan` workflow that detects both bare and non-bare golden repos,
-  generates `scan_report.json`/`scan_manifest.json`, and ingests only new
-  fragments into workspaces.
-- Bare repository detection during scanning and mirroring (bare goldens are
-  cloned into working trees automatically).
-- `--golden-gh-pull` option that clones all `gh` user repositories into the
-  workspace, comparing them against existing goldens and replacing only when the
-  GitHub copy is newer.
+- Added `scripts/publish_repos.sh` to detect `golden` checkouts, ensure `gh_default`
+  remotes, and mirror every ref/tag via SSH (plus `--limit`, `--dry-run`,
+  `--remote-only` helpers) as well as `scripts/move_invalid_repos.py` that
+  relocates invalid golden/fragment directories before running scans.
+- `publish_repos.sh` now derives the GitHub target from each repo’s origin URL,
+  omitting the owner prefix only when it matches the authenticated user so
+  non personal repos retain their original owner in the mirrored name.
 - Added `scripts/publish_repos.sh` to detect `golden` checkouts, ensure `gh_default`
   remotes, and mirror every ref/tag via SSH (plus `--limit`, `--dry-run`,
   `--remote-only` helpers) as well as `scripts/move_invalid_repos.py` that
