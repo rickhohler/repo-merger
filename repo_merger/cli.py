@@ -301,13 +301,9 @@ def _process_single_run(
     )
 
     records: List[FragmentRecord] = []
-    success_paths: List[Path] = []
     failure_paths: List[Path] = []
-    if not args.dry_run:
-        if golden_status == "failed":
-            failure_paths.append(golden_path)
-        else:
-            success_paths.append(golden_path)
+    if not args.dry_run and golden_status == "failed":
+        failure_paths.append(golden_path)
     failure_fragments: List[Path] = []
     if fragment_paths:
         try:
@@ -317,7 +313,6 @@ def _process_single_run(
             failure_fragments = fragment_paths
         else:
             logging.info("Processed %d fragment(s)", len(records))
-            success_paths.extend(Path(record.source) for record in records)
     else:
         logging.info("No fragments provided for ingestion.")
     failure_paths.extend(failure_fragments)
@@ -365,7 +360,6 @@ def _process_single_run(
         _write_scan_status_files(
             paths.root,
             source_identifier=scan_context.source_identifier,
-            success_paths=success_paths,
             failure_paths=failure_paths,
         )
     return ingested_count, golden_status
@@ -584,13 +578,10 @@ def _write_scan_status_files(
     workspace_root: Path,
     *,
     source_identifier: str,
-    success_paths: Sequence[Path],
     failure_paths: Sequence[Path],
 ) -> None:
     identifier = source_identifier or "scan"
-    success_entries = [_format_status_entry(identifier, path) for path in success_paths]
     failure_entries = [_format_status_entry(identifier, path) for path in failure_paths]
-    _update_status_file(workspace_root / "scan_succeeded.txt", success_entries)
     _update_status_file(workspace_root / "scan_failed.txt", failure_entries)
 
 

@@ -127,42 +127,33 @@ def test_log_scan_summary_reports_failed_goldens(caplog: pytest.LogCaptureFixtur
 def test_write_scan_status_files_accumulates(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    success_paths = [tmp_path / "done-a", tmp_path / "done-b"]
-    failure_paths = [tmp_path / "failed-a"]
+    failure_paths = [tmp_path / "failed-a", tmp_path / "failed-b"]
     source_identifier = "usb-drive"
 
     _write_scan_status_files(
         workspace,
-        success_paths=success_paths,
         failure_paths=failure_paths,
         source_identifier=source_identifier,
     )
 
-    succeeded = sorted((workspace / "scan_succeeded.txt").read_text().splitlines())
     failed = sorted((workspace / "scan_failed.txt").read_text().splitlines())
-
-    expected_success = sorted(
-        f"{source_identifier}:{path}" for path in success_paths
-    )
     expected_failure = sorted(
         f"{source_identifier}:{path}" for path in failure_paths
     )
-    assert succeeded == expected_success
     assert failed == expected_failure
 
-    extra_success = [tmp_path / "done-a", tmp_path / "done-c"]
+    extra_failures = [tmp_path / "failed-a", tmp_path / "failed-c"]
     _write_scan_status_files(
         workspace,
-        success_paths=extra_success,
-        failure_paths=[],
+        failure_paths=extra_failures,
         source_identifier=source_identifier,
     )
 
-    resumed = sorted((workspace / "scan_succeeded.txt").read_text().splitlines())
+    updated = sorted((workspace / "scan_failed.txt").read_text().splitlines())
     expected_combined = sorted(
         {
             f"{source_identifier}:{path}"
-            for path in success_paths + extra_success
+            for path in failure_paths + extra_failures
         }
     )
-    assert resumed == expected_combined
+    assert updated == expected_combined
