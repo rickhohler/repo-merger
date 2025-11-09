@@ -12,10 +12,6 @@ All notable changes to this project will be documented in this file and follow
 - `publish_repos.sh` now derives the GitHub target from each repo’s origin URL,
   omitting the owner prefix only when it matches the authenticated user so
   non personal repos retain their original owner in the mirrored name.
-- Added `scripts/publish_repos.sh` to detect `golden` checkouts, ensure `gh_default`
-  remotes, and mirror every ref/tag via SSH (plus `--limit`, `--dry-run`,
-  `--remote-only` helpers) as well as `scripts/move_invalid_repos.py` that
-  relocates invalid golden/fragment directories before running scans.
 
 ### Changed
 - Workspace preparation reuses existing directories unless `--force` is passed,
