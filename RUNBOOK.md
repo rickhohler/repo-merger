@@ -127,9 +127,13 @@ Operator checklist:
    etc.). Each detected golden repo (bare or non-bare) is mirrored into its own
    workspace identifier and any new fragments are ingested automatically.
 3. Inspect `scan_report.json` for classification decisions (including bare
-   repo detections) and `scan_manifest.json` for ingestion history. Manually
-   copy/update golden repos inside the workspace as needed; subsequent scans
-   remain idempotent.
+   repo detections) and `scan_manifest.json` for ingestion history. Each report
+   now stores its results under the `identifier` map keyed by the source label
+   (`--scan-source-id` or the scan directory name), so rerunning the same
+   identifier replaces that section while other identifiers stay available.
+4. Read `scan_failed.txt` for absolute paths requiring follow-up; since
+   `scan_report.json` already records every processed directory, `scan_succeeded`
+   is no longer emitted.
 
 ## Appendix: Golden pull
 

@@ -143,8 +143,14 @@ Workflow:
    compared like non-bare repos.
 4. Review `scan_report.json` and `scan_manifest.json` inside each workspace to
    see what was discovered, ingested, or skipped (including classifications of
-   “likely golden” vs “fragment”). Re-running the scan is idempotent; previously
+   “likely golden” vs “fragment”). Each report now stores data under
+   `"identifier"` keys (one per `--scan-source-id` or derived scan directory), so
+   rerunning with the same identifier updates that section while other
+   identifiers remain untouched. Re-running the scan is idempotent; previously
    ingested fragments are skipped unless their content changes.
+5. Inspect `scan_failed.txt` in the same workspace for absolute paths that still
+   need attention; the other scan outputs already list every processed path so
+   we no longer write `scan_succeeded.txt`.
 
 ### Bare repositories
 
