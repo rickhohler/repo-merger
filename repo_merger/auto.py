@@ -127,8 +127,15 @@ class ScanContext:
         self._write_report()
 
     def _write_report(self) -> None:
-        payload = {
-            "source_identifier": self.source_identifier,
+        payload: dict[str, object] = {}
+        if self.report_path.exists():
+            try:
+                payload = json.loads(self.report_path.read_text())
+            except json.JSONDecodeError:
+                payload = {}
+        identifiers = payload.setdefault("identifier", {})
+        identifiers[self.source_identifier] = {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "entries": [entry.__dict__ for entry in self.report_entries],
         }
         self.report_path.write_text(json.dumps(payload, indent=2))

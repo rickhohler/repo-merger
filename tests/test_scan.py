@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections import Counter
 from pathlib import Path
@@ -25,6 +26,13 @@ def make_git_repo(path: Path, has_remote: bool = True) -> None:
         config.write_text('[remote "origin"]\nurl = git@example.com:demo/repo.git\n')
     else:
         config.write_text("[core]\n\trepositoryformatversion = 0\n")
+
+
+class DummyRecord:
+    def __init__(self, source: str, fragment_id: str, destination: str) -> None:
+        self.source = source
+        self.fragment_id = fragment_id
+        self.destination = destination
 
 
 def test_scan_for_repos_classifies_golden_and_fragment(tmp_path: Path) -> None:
@@ -95,12 +103,6 @@ def test_scan_manifest_records_ingestion(tmp_path: Path) -> None:
         )
     )
 
-    class DummyRecord:
-        def __init__(self, source: str, fragment_id: str, destination: str) -> None:
-            self.source = source
-            self.fragment_id = fragment_id
-            self.destination = destination
-
     record = DummyRecord(
         source=str(candidate.path),
         fragment_id="001-fragment-hash",
@@ -157,3 +159,74 @@ def test_write_scan_status_files_accumulates(tmp_path: Path) -> None:
         }
     )
     assert updated == expected_combined
+
+
+def test_scan_report_tracks_identifier(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manifest = ScanManifest(workspace / "scan_manifest.json")
+    report_path = workspace / "scan_report.json"
+    context = ScanContext(
+        manifest=manifest,
+        report_path=report_path,
+        source_identifier="SPRINT_V1",
+    )
+    context.add_report_entry(
+        ScanReportEntry(
+            source="/Volumes/SPRINT/foo",
+            classification="golden",
+            confidence=0.5,
+            action="candidate",
+            reason="initial",
+        )
+    )
+    context.finalize_ingestion([], identifier="demo", dry_run=False)
+
+    data = json.loads(report_path.read_text())
+    assert "identifier" in data
+    assert "SPRINT_V1" in data["identifier"]
+    assert data["identifier"]["SPRINT_V1"]["entries"][0]["action"] == "candidate"
+
+    second_manifest = ScanManifest(workspace / "scan_manifest.json")
+    second_context = ScanContext(
+        manifest=second_manifest,
+        report_path=report_path,
+        source_identifier="SPRINT_V1",
+    )
+    second_context.add_report_entry(
+        ScanReportEntry(
+            source="/Volumes/SPRINT/foo",
+            classification="golden",
+            confidence=0.7,
+            action="workspace-golden",
+            reason="updated",
+        )
+    )
+    second_context.finalize_ingestion([], identifier="demo", dry_run=False)
+
+    refreshed = json.loads(report_path.read_text())
+    assert len(refreshed["identifier"]) == 1
+    assert (
+        refreshed["identifier"]["SPRINT_V1"]["entries"][0]["action"]
+        == "workspace-golden"
+    )
+
+    third_context = ScanContext(
+        manifest=ScanManifest(workspace / "scan_manifest.json"),
+        report_path=report_path,
+        source_identifier="SPRINT_V2",
+    )
+    third_context.add_report_entry(
+        ScanReportEntry(
+            source="/Volumes/SPRINT/bar",
+            classification="fragment",
+            confidence=0.8,
+            action="ingest",
+            reason="new",
+        )
+    )
+    third_context.finalize_ingestion([], identifier="demo", dry_run=False)
+
+    final = json.loads(report_path.read_text())
+    assert "SPRINT_V2" in final["identifier"]
+    assert len(final["identifier"]) == 2
