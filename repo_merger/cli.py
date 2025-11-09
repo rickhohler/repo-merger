@@ -474,7 +474,7 @@ def _install_golden(destination: Path, candidate: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(candidate), str(destination))
+    shutil.copytree(candidate, destination, symlinks=True)
 
 
 def _evaluate_golden_candidate(existing: Path, candidate: Path) -> tuple[str, str]:

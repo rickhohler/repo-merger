@@ -160,6 +160,18 @@ produce a working tree before running analysis/merge. Bare fragments are logged
 with lower confidence and require operator approval (e.g., via
 `--recover-missing`) before ingestion.
 
+### Publishing mirrored golden repositories
+
+`scripts/publish_repos.sh` walks every `<workspace>/<project>/golden` directory,
+ensures a `gh_default` SSH remote exists (creating the private GitHub repo via
+`gh` when needed), and mirrors the complete history/refs via `git push --mirror`.
+Pass `--dry-run` to preview the work, `--remote-only` to skip the push, and
+`--limit <n>` to stop after mirroring the first `n` golden repos.
+
+When your workspace still contains invalid golden or fragment trees, use
+`scripts/move_invalid_repos.py ~/BUCKET/REPO_WORKSPACE` to relocate those
+directories into `invalid-save` before rerunning the scan/publish flow.
+
 ### Preparing workspaces in bulk
 
 Use `scripts/prepare_repo_workspaces.sh` to scan `REPOS_SOURCES`, create the

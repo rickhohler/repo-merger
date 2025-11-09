@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file and follow
 - `--golden-gh-pull` option that clones all `gh` user repositories into the
   workspace, comparing them against existing goldens and replacing only when the
   GitHub copy is newer.
+- Added `scripts/publish_repos.sh` to detect `golden` checkouts, ensure `gh_default`
+  remotes, and mirror every ref/tag via SSH (plus `--limit`, `--dry-run`,
+  `--remote-only` helpers) as well as `scripts/move_invalid_repos.py` that
+  relocates invalid golden/fragment directories before running scans.
 
 ### Changed
 - Workspace preparation reuses existing directories unless `--force` is passed,
