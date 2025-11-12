@@ -141,9 +141,26 @@ push_repo() {
     pushed_dry+=1
     echo "[$repo_slug] DRY-RUN: would mirror-push -> $remote_name"
   else
-    git -C "$repo_dir" push --mirror "$remote_name"
-    pushed+=1
-    echo "[$repo_slug] Mirrored all refs to $remote_name"
+    local attempt=1
+    local max_attempts=2
+    local push_output
+
+    while true; do
+      if push_output=$(git -C "$repo_dir" push --mirror "$remote_name" 2>&1); then
+        pushed+=1
+        echo "[$repo_slug] Mirrored all refs to $remote_name"
+        return
+      fi
+
+      printf "[$repo_slug] Push error (attempt %d): %s\n" "$attempt" "$push_output"
+      if (( attempt >= max_attempts )); then
+        die "[$repo_slug] git push --mirror failed after enabling lfs.allowincompletepush: $push_output"
+      fi
+
+      git -C "$repo_dir" config lfs.allowincompletepush true
+      echo "[$repo_slug] Enabled git config lfs.allowincompletepush=true and retrying"
+      attempt=$((attempt + 1))
+    done
   fi
 }
 
