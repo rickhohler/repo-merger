@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file and follow
 - `publish_repos.sh` now derives the GitHub target from each repo’s origin URL,
   omitting the owner prefix only when it matches the authenticated user so
   non personal repos retain their original owner in the mirrored name.
+- Workspace identifier derivation tolerates duplicate `.git/config` entries
+  (e.g., `vscode-merge-base`) by parsing with `ConfigParser(strict=False)`,
+  preventing `DuplicateOptionError` during workspace scans.
 
 ### Changed
 - Workspace preparation reuses existing directories unless `--force` is passed,

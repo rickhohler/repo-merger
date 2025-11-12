@@ -144,7 +144,7 @@ def _ensure_checkout_branch(repo: Path) -> None:
 
 
 def _identifier_from_config(config_path: Path) -> Optional[str]:
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(strict=False)
     parser.read(config_path)
     remote_section = 'remote "origin"'
     if remote_section not in parser:
